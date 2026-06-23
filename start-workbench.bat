@@ -10,21 +10,33 @@ if not defined OPEN_BROWSER set "OPEN_BROWSER=1"
 set "HOST=127.0.0.1"
 set "URL=http://%HOST%:%PORT%"
 rem Default frontend URL: http://127.0.0.1:4173
+rem Equivalent command: npm run dev
 
 where npm >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] npm was not found.
-  echo Install Node.js, or run this project from the Codex desktop environment.
-  echo.
-  pause
-  exit /b 1
+  set "BUNDLED_PNPM=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd"
+  if exist "%BUNDLED_PNPM%" (
+    set "PM_EXE=%BUNDLED_PNPM%"
+  ) else (
+    where pnpm >nul 2>nul
+    if errorlevel 1 (
+      echo [ERROR] npm or pnpm was not found.
+      echo Install Node.js, or run this project from the Codex desktop environment.
+      echo.
+      pause
+      exit /b 1
+    )
+    set "PM_EXE=pnpm"
+  )
+) else (
+  set "PM_EXE=npm"
 )
 
 if not exist "node_modules" (
-  echo Installing npm dependencies...
-  npm install
+  echo Installing dependencies...
+  "%PM_EXE%" install
   if errorlevel 1 (
-    echo [ERROR] npm install failed.
+    echo [ERROR] Dependency installation failed.
     pause
     exit /b 1
   )
@@ -41,7 +53,7 @@ if not "%OPEN_BROWSER%"=="0" (
   start "" /min powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Milliseconds 1200; Start-Process '%URL%'"
 )
 
-npm run dev
+"%PM_EXE%" run dev
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

@@ -39,6 +39,7 @@ test('Windows launcher starts the dual-process workbench', async () => {
   const readme = await readFile('README.md', 'utf8');
 
   assert.match(script, /API_PORT=26563/);
+  assert.match(script, /pnpm/, 'launcher should fall back to pnpm when npm is unavailable');
   assert.match(script, /npm run dev/);
   assert.match(script, /http:\/\/127\.0\.0\.1:4173/);
   assert.match(readme, /26563/);

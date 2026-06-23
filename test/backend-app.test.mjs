@@ -94,3 +94,49 @@ test('POST /api/scene-render-data returns drawable scene data', async () => {
   assert.equal(response.json().ok, true);
   assert.equal(response.json().data.orbits[0].id, 'orbit-1');
 });
+
+test('ground-track API returns render data, stats, and CSV', async () => {
+  const app = createBackendApp({ logger: false });
+  const orbitResponse = await app.inject({
+    method: 'POST',
+    url: '/api/orbit',
+    payload: {
+      id: 'orbit-1',
+      elements: {
+        name: 'API Orbit',
+        semiMajorAxisKm: 7000,
+        eccentricity: 0,
+        inclinationDeg: 30,
+        raanDeg: 0,
+        argPeriapsisDeg: 0,
+        trueAnomalyDeg: 0,
+      },
+    },
+  });
+  const orbit = orbitResponse.json().data;
+  const renderResponse = await app.inject({
+    method: 'POST',
+    url: '/api/ground-track-render-data',
+    payload: { orbits: [orbit], elapsedSeconds: 30 },
+  });
+  const tracks = renderResponse.json().data.tracks;
+  const statsResponse = await app.inject({
+    method: 'POST',
+    url: '/api/ground-track-region-stats',
+    payload: {
+      tracks,
+      bounds: { westDeg: -180, eastDeg: 180, southDeg: -90, northDeg: 90 },
+    },
+  });
+  const csvResponse = await app.inject({
+    method: 'POST',
+    url: '/api/ground-track-csv',
+    payload: { tracks },
+  });
+  await app.close();
+
+  assert.equal(renderResponse.statusCode, 200);
+  assert.equal(statsResponse.json().data.totalOrbitCount, 1);
+  assert.equal(csvResponse.headers['content-type'].startsWith('text/csv'), true);
+  assert.match(csvResponse.body, /API Orbit/);
+});

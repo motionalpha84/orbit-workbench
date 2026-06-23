@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 
 import { API_VERSION } from '../shared/contracts.mjs';
 import { ApiRequestError, fail, methodNotAllowed, notFound } from './errors.mjs';
+import { registerGroundTrackRoutes } from './routes/groundtrack.mjs';
 import { registerOrbitRoutes } from './routes/orbits.mjs';
 import { registerRenderDataRoutes } from './routes/render-data.mjs';
 
@@ -38,6 +39,7 @@ export function createBackendApp(options = {}) {
 
   app.register(registerOrbitRoutes);
   app.register(registerRenderDataRoutes);
+  app.register(registerGroundTrackRoutes);
 
   app.setNotFoundHandler((request) => {
     throw notFound(new URL(request.url, 'http://127.0.0.1').pathname);

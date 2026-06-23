@@ -227,3 +227,14 @@ test('app loads orbit and scene render data from the backend', async () => {
   assert.doesNotMatch(app, /computeOrbit/, 'app should not compute orbit records directly');
   assert.doesNotMatch(app, /propagateOrbit/, 'app should not propagate orbits directly');
 });
+
+test('app loads ground-track render data and stats from the backend', async () => {
+  const app = await readFile('js/app.mjs', 'utf8');
+
+  assert.match(app, /backend\.groundTrackRenderData/, 'app should request ground-track render data through the backend');
+  assert.match(app, /backend\.groundTrackRegionStats/, 'app should request region stats through the backend');
+  assert.match(app, /backend\.groundTrackCsv/, 'app should request CSV through the backend');
+  assert.doesNotMatch(app, /from '\.\/groundtrack-history\.mjs'/, 'app should not import ground-track history calculation');
+  assert.doesNotMatch(app, /groundTrackRegionStats,/, 'app should not import direct region stats calculation');
+  assert.doesNotMatch(app, /groundTrackBudget/, 'app should not calculate backend sampling budget');
+});

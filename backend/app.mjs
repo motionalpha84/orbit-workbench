@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 
 import { API_VERSION } from '../shared/contracts.mjs';
 import { ApiRequestError, fail, methodNotAllowed, notFound } from './errors.mjs';
+import { registerOrbitRoutes } from './routes/orbits.mjs';
 
 const POST_ONLY_PATHS = new Set([
   '/api/orbit',
@@ -33,6 +34,8 @@ export function createBackendApp(options = {}) {
       throw methodNotAllowed(path, request.method);
     });
   }
+
+  app.register(registerOrbitRoutes);
 
   app.setNotFoundHandler((request) => {
     throw notFound(new URL(request.url, 'http://127.0.0.1').pathname);

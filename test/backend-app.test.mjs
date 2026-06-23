@@ -35,3 +35,31 @@ test('known POST route called with GET returns structured 405', async () => {
   assert.equal(response.json().ok, false);
   assert.equal(response.json().error.code, 'METHOD_NOT_ALLOWED');
 });
+
+test('POST /api/orbit returns computed orbit data', async () => {
+  const app = createBackendApp({ logger: false });
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/orbit',
+    payload: {
+      id: 'orbit-1',
+      color: '#568c87',
+      elements: {
+        name: 'API Orbit',
+        semiMajorAxisKm: 7000,
+        eccentricity: 0,
+        inclinationDeg: 0,
+        raanDeg: 0,
+        argPeriapsisDeg: 0,
+        trueAnomalyDeg: 0,
+      },
+    },
+  });
+  await app.close();
+
+  const payload = response.json();
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.id, 'orbit-1');
+  assert.equal(payload.data.metrics.initialPositionKm.x, 7000);
+});

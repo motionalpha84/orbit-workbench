@@ -63,3 +63,34 @@ test('POST /api/orbit returns computed orbit data', async () => {
   assert.equal(payload.data.id, 'orbit-1');
   assert.equal(payload.data.metrics.initialPositionKm.x, 7000);
 });
+
+test('POST /api/scene-render-data returns drawable scene data', async () => {
+  const app = createBackendApp({ logger: false });
+  const orbitResponse = await app.inject({
+    method: 'POST',
+    url: '/api/orbit',
+    payload: {
+      id: 'orbit-1',
+      elements: {
+        name: 'API Orbit',
+        semiMajorAxisKm: 7000,
+        eccentricity: 0,
+        inclinationDeg: 0,
+        raanDeg: 0,
+        argPeriapsisDeg: 0,
+        trueAnomalyDeg: 0,
+      },
+    },
+  });
+  const orbit = orbitResponse.json().data;
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/scene-render-data',
+    payload: { orbits: [orbit], elapsedSeconds: 10 },
+  });
+  await app.close();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().ok, true);
+  assert.equal(response.json().data.orbits[0].id, 'orbit-1');
+});

@@ -205,3 +205,13 @@ test('local server entrypoint and Windows launch script are present', async () =
   assert.match(script, /npm run dev/, 'script should start the frontend and backend together');
   assert.match(readme, /start-workbench\.bat/, 'README should document the launch script');
 });
+
+test('scene consumes backend render data instead of propagating orbits', async () => {
+  const scene = await readFile('js/scene.mjs', 'utf8');
+
+  assert.match(scene, /applyRenderData/, 'scene should expose a render-data ingestion method');
+  assert.match(scene, /applyOrbitRenderData/, 'scene should update individual orbit groups from backend data');
+  assert.doesNotMatch(scene, /from '\.\/orbit\.mjs'/, 'scene should not import orbit propagation');
+  assert.doesNotMatch(scene, /propagateOrbit/, 'scene should not propagate orbit state');
+  assert.doesNotMatch(scene, /sampleOrbit/, 'scene should not sample orbit references');
+});

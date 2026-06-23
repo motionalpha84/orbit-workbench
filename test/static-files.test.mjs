@@ -215,3 +215,15 @@ test('scene consumes backend render data instead of propagating orbits', async (
   assert.doesNotMatch(scene, /propagateOrbit/, 'scene should not propagate orbit state');
   assert.doesNotMatch(scene, /sampleOrbit/, 'scene should not sample orbit references');
 });
+
+test('app loads orbit and scene render data from the backend', async () => {
+  const app = await readFile('js/app.mjs', 'utf8');
+
+  assert.match(app, /from '\.\/api-client\.mjs'/, 'app should import the frontend API client');
+  assert.match(app, /createBackendClient/, 'app should create a backend client');
+  assert.match(app, /backend\.createOrbit/, 'app should create orbit records through the backend');
+  assert.match(app, /backend\.sceneRenderData/, 'app should request scene render data through the backend');
+  assert.match(app, /scene\.applyRenderData/, 'app should pass backend render data to the scene');
+  assert.doesNotMatch(app, /computeOrbit/, 'app should not compute orbit records directly');
+  assert.doesNotMatch(app, /propagateOrbit/, 'app should not propagate orbits directly');
+});

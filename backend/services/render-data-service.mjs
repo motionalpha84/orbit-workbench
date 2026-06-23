@@ -98,6 +98,7 @@ export function createSceneRenderData(input = {}) {
         id: orbitRecord.id,
         name: orbitRecord.name,
         color: orbitRecord.color,
+        periodSeconds: orbitRecord.orbit.periodSeconds,
         visible: orbitRecord.visible !== false,
         referencePoints,
         playbackSamples,

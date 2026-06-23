@@ -19,6 +19,11 @@ function normalizePerturbationModel(model) {
   return SUPPORTED_PERTURBATION_MODELS.has(model) ? model : 'two-body';
 }
 
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
 function colorFromHex(hex) {
   return new THREE.Color(hex);
 }
@@ -290,6 +295,78 @@ export function orbitReferenceSampleCount(orbit, maxSamples = MAX_REFERENCE_SAMP
     MIN_REFERENCE_SAMPLES,
     maximumSamples,
   );
+}
+
+function wrapElapsedSeconds(elapsedSeconds, periodSeconds) {
+  const period = Math.max(1e-6, finiteNumber(periodSeconds, 1));
+  const wrapped = finiteNumber(elapsedSeconds) % period;
+  return wrapped < 0 ? wrapped + period : wrapped;
+}
+
+function interpolatePoint(a = {}, b = {}, fraction = 0) {
+  return {
+    x: finiteNumber(a.x) + (finiteNumber(b.x) - finiteNumber(a.x)) * fraction,
+    y: finiteNumber(a.y) + (finiteNumber(b.y) - finiteNumber(a.y)) * fraction,
+    z: finiteNumber(a.z) + (finiteNumber(b.z) - finiteNumber(a.z)) * fraction,
+  };
+}
+
+function interpolateSample(previous, next, fraction, elapsedSeconds) {
+  return {
+    ...next,
+    elapsedSeconds,
+    scenePoint: interpolatePoint(previous.scenePoint, next.scenePoint, fraction),
+    positionKm: previous.positionKm && next.positionKm
+      ? interpolatePoint(previous.positionKm, next.positionKm, fraction)
+      : next.positionKm,
+    velocityKmS: previous.velocityKmS && next.velocityKmS
+      ? interpolatePoint(previous.velocityKmS, next.velocityKmS, fraction)
+      : next.velocityKmS,
+  };
+}
+
+export function playbackSampleAt(samples = [], elapsedSeconds = 0, periodSeconds = 0) {
+  const ordered = samples
+    .filter((sample) => Number.isFinite(Number(sample.elapsedSeconds)))
+    .slice()
+    .sort((a, b) => a.elapsedSeconds - b.elapsedSeconds);
+  if (ordered.length === 0) return null;
+  if (ordered.length === 1) return ordered[0];
+
+  const period = Math.max(
+    finiteNumber(periodSeconds, 0),
+    finiteNumber(ordered[ordered.length - 1].elapsedSeconds, 0),
+    1e-6,
+  );
+  const wrapped = wrapElapsedSeconds(elapsedSeconds, period);
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const next = ordered[index];
+    if (wrapped <= next.elapsedSeconds) {
+      const span = Math.max(1e-6, next.elapsedSeconds - previous.elapsedSeconds);
+      return interpolateSample(previous, next, (wrapped - previous.elapsedSeconds) / span, wrapped);
+    }
+  }
+
+  const previous = ordered[ordered.length - 1];
+  const first = ordered[0];
+  const next = { ...first, elapsedSeconds: first.elapsedSeconds + period };
+  const span = Math.max(1e-6, next.elapsedSeconds - previous.elapsedSeconds);
+  return interpolateSample(previous, next, (wrapped - previous.elapsedSeconds) / span, wrapped);
+}
+
+function tailSamplesFromPlaybackSamples(samples = [], elapsedSeconds = 0, periodSeconds = 1) {
+  const period = Math.max(1e-6, finiteNumber(periodSeconds, 1));
+  const tailSpan = Math.min(period * 0.22, Math.max(420, period * 0.1));
+  return Array.from({ length: DEFAULT_TRAIL_POINTS }, (_, index) => {
+    const fade = index / (DEFAULT_TRAIL_POINTS - 1);
+    const sample = playbackSampleAt(samples, elapsedSeconds - tailSpan * (1 - fade), period);
+    return {
+      ...sample,
+      alpha: 0.03 + fade ** 1.35 * 0.84,
+      phase: fade,
+    };
+  });
 }
 
 class ArcballControls {
@@ -813,7 +890,11 @@ export class OrbitScene {
 
   applyOrbitRenderData(group, orbitRenderData) {
     this.updateOrbitReference(group, orbitRenderData.referencePoints ?? []);
-    const tailSamples = orbitRenderData.tailSamples ?? [];
+    const playbackSamples = orbitRenderData.playbackSamples ?? [];
+    const periodSeconds = finiteNumber(orbitRenderData.periodSeconds, 0);
+    const tailSamples = playbackSamples.length > 0
+      ? tailSamplesFromPlaybackSamples(playbackSamples, this.elapsedSeconds, periodSeconds)
+      : orbitRenderData.tailSamples ?? [];
     const positions = group.tail.geometry.getAttribute('position');
     const alphas = group.tail.geometry.getAttribute('alpha');
     const phases = group.tail.geometry.getAttribute('phase');
@@ -830,7 +911,10 @@ export class OrbitScene {
     alphas.needsUpdate = true;
     phases.needsUpdate = true;
 
-    const currentPoint = orbitRenderData.current?.scenePoint;
+    const currentSample = playbackSamples.length > 0
+      ? playbackSampleAt(playbackSamples, this.elapsedSeconds, periodSeconds)
+      : orbitRenderData.current;
+    const currentPoint = currentSample?.scenePoint;
     if (currentPoint) group.marker.position.set(currentPoint.x, currentPoint.y, currentPoint.z);
   }
 

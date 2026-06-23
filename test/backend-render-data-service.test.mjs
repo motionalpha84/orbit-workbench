@@ -35,6 +35,7 @@ test('creates 3D render data for visible orbits', () => {
   assert.equal(data.perturbationModel, 'j2');
   assert.equal(data.orbits.length, 1);
   assert.equal(data.orbits[0].id, 'orbit-1');
+  assert.ok(data.orbits[0].periodSeconds > 0);
   assert.ok(data.orbits[0].referencePoints.length >= 180);
   assert.ok(data.orbits[0].playbackSamples.length >= 180);
   assert.equal(data.orbits[0].tailSamples.length, 130);

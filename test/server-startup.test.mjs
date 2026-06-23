@@ -28,6 +28,7 @@ test('package scripts expose frontend, backend, dev, and test commands', async (
   assert.equal(pkg.scripts.frontend, 'node server.mjs');
   assert.equal(pkg.scripts.backend, 'node backend/server.mjs');
   assert.match(pkg.scripts.dev, /concurrently/);
+  assert.doesNotMatch(pkg.scripts.dev, /npm run/, 'dev should not require npm inside child processes');
   assert.equal(pkg.scripts.test, 'node --test');
   assert.equal(pkg.dependencies.fastify.length > 0, true);
   assert.equal(pkg.dependencies['@fastify/cors'].length > 0, true);
@@ -40,6 +41,7 @@ test('Windows launcher starts the dual-process workbench', async () => {
 
   assert.match(script, /API_PORT=26563/);
   assert.match(script, /pnpm/, 'launcher should fall back to pnpm when npm is unavailable');
+  assert.match(script, /BUNDLED_NODE_DIR/, 'launcher should add bundled Node to PATH when node is unavailable');
   assert.match(script, /npm run dev/);
   assert.match(script, /http:\/\/127\.0\.0\.1:4173/);
   assert.match(readme, /26563/);

@@ -9,8 +9,16 @@ if not defined API_PORT set "API_PORT=26563"
 if not defined OPEN_BROWSER set "OPEN_BROWSER=1"
 set "HOST=127.0.0.1"
 set "URL=http://%HOST%:%PORT%"
+set "BUNDLED_NODE_DIR=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin"
 rem Default frontend URL: http://127.0.0.1:4173
 rem Equivalent command: npm run dev
+
+where node >nul 2>nul
+if errorlevel 1 (
+  if exist "%BUNDLED_NODE_DIR%\node.exe" (
+    set "PATH=%BUNDLED_NODE_DIR%;%PATH%"
+  )
+)
 
 where npm >nul 2>nul
 if errorlevel 1 (

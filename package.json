@@ -6,7 +6,7 @@
   "scripts": {
     "frontend": "node server.mjs",
     "backend": "node backend/server.mjs",
-    "dev": "concurrently -k -n frontend,backend -c cyan,green \"npm run frontend\" \"npm run backend\"",
+    "dev": "concurrently -k -n frontend,backend -c cyan,green \"node server.mjs\" \"node backend/server.mjs\"",
     "test": "node --test"
   },
   "dependencies": {

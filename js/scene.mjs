@@ -284,6 +284,13 @@ export function frameAxesRotationAngleAt(frame, elapsedSeconds) {
   return frame === 'ECEF' ? earthRotationAngleAt(elapsedSeconds) : 0;
 }
 
+export function renderTimingAngles(frame, elapsedSeconds) {
+  return {
+    earthRotationAngleRad: earthRotationAngleAt(elapsedSeconds),
+    frameAxesRotationAngleRad: frameAxesRotationAngleAt(frame, elapsedSeconds),
+  };
+}
+
 export function orbitReferenceSampleCount(orbit, maxSamples = MAX_REFERENCE_SAMPLES) {
   const a = orbit.elements.semiMajorAxisKm * KM_TO_SCENE;
   const b = a * Math.sqrt(1 - orbit.elements.eccentricity ** 2);
@@ -295,6 +302,27 @@ export function orbitReferenceSampleCount(orbit, maxSamples = MAX_REFERENCE_SAMP
     MIN_REFERENCE_SAMPLES,
     maximumSamples,
   );
+}
+
+function referencePointSignaturePart(sample = {}) {
+  const scenePoint = sample.scenePoint ?? {};
+  return [
+    finiteNumber(sample.elapsedSeconds).toFixed(6),
+    finiteNumber(scenePoint.x).toFixed(6),
+    finiteNumber(scenePoint.y).toFixed(6),
+    finiteNumber(scenePoint.z).toFixed(6),
+  ].join(':');
+}
+
+export function referencePointsSignature(referencePoints = []) {
+  if (!Array.isArray(referencePoints) || referencePoints.length === 0) return '0';
+  const middle = referencePoints[Math.floor(referencePoints.length / 2)];
+  return [
+    referencePoints.length,
+    referencePointSignaturePart(referencePoints[0]),
+    referencePointSignaturePart(middle),
+    referencePointSignaturePart(referencePoints[referencePoints.length - 1]),
+  ].join('|');
 }
 
 function wrapElapsedSeconds(elapsedSeconds, periodSeconds) {
@@ -868,8 +896,9 @@ export class OrbitScene {
   applyRenderData(renderData = {}) {
     this.elapsedSeconds = Number(renderData.elapsedSeconds) || 0;
     this.perturbationModel = normalizePerturbationModel(renderData.perturbationModel);
-    this.earthBody.rotation.y = Number(renderData.earthRotationAngleRad) || earthRotationAngleAt(this.elapsedSeconds);
-    this.axesGroup.rotation.y = Number(renderData.frameAxesRotationAngleRad) || frameAxesRotationAngleAt(this.frame, this.elapsedSeconds);
+    const timingAngles = renderTimingAngles(this.frame, this.elapsedSeconds);
+    this.earthBody.rotation.y = timingAngles.earthRotationAngleRad;
+    this.axesGroup.rotation.y = timingAngles.frameAxesRotationAngleRad;
     const renderOrbits = Array.isArray(renderData.orbits) ? renderData.orbits : [];
     const shellRecords = renderOrbits.map((orbit) => ({
       id: orbit.id,
@@ -889,7 +918,12 @@ export class OrbitScene {
   }
 
   applyOrbitRenderData(group, orbitRenderData) {
-    this.updateOrbitReference(group, orbitRenderData.referencePoints ?? []);
+    const referencePoints = orbitRenderData.referencePoints ?? [];
+    const nextReferenceSignature = referencePointsSignature(referencePoints);
+    if (group.referenceSignature !== nextReferenceSignature) {
+      this.updateOrbitReference(group, referencePoints);
+      group.referenceSignature = nextReferenceSignature;
+    }
     const playbackSamples = orbitRenderData.playbackSamples ?? [];
     const periodSeconds = finiteNumber(orbitRenderData.periodSeconds, 0);
     const tailSamples = playbackSamples.length > 0

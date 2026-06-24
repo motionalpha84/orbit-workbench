@@ -211,6 +211,8 @@ test('scene consumes backend render data instead of propagating orbits', async (
 
   assert.match(scene, /applyRenderData/, 'scene should expose a render-data ingestion method');
   assert.match(scene, /applyOrbitRenderData/, 'scene should update individual orbit groups from backend data');
+  assert.match(scene, /referencePointsSignature/, 'scene should fingerprint static reference geometry payloads');
+  assert.match(scene, /group\.referenceSignature !== nextReferenceSignature/, 'scene should not rebuild reference geometry every playback frame');
   assert.doesNotMatch(scene, /from '\.\/orbit\.mjs'/, 'scene should not import orbit propagation');
   assert.doesNotMatch(scene, /propagateOrbit/, 'scene should not propagate orbit state');
   assert.doesNotMatch(scene, /sampleOrbit/, 'scene should not sample orbit references');

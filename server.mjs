@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const root = resolve(import.meta.dirname);
 const defaultPort = Number(process.env.PORT || 4173);
@@ -55,7 +56,7 @@ export function startFrontendServer({ port = defaultPort, host = '127.0.0.1', lo
   });
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll('\\', '/'))) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   startFrontendServer().catch((error) => {
     console.error(error);
     process.exitCode = 1;

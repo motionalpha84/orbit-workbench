@@ -234,6 +234,8 @@ test('app loads ground-track render data and stats from the backend', async () =
   assert.match(app, /backend\.groundTrackRenderData/, 'app should request ground-track render data through the backend');
   assert.match(app, /backend\.groundTrackRegionStats/, 'app should request region stats through the backend');
   assert.match(app, /backend\.groundTrackCsv/, 'app should request CSV through the backend');
+  assert.match(app, /groundTrackHistoryKey/, 'app should scope backend ground-track history to this browser session');
+  assert.match(app, /historyKey: state\.groundTrackHistoryKey/, 'app should send the backend history key with render requests');
   assert.doesNotMatch(app, /from '\.\/groundtrack-history\.mjs'/, 'app should not import ground-track history calculation');
   assert.doesNotMatch(app, /groundTrackRegionStats,/, 'app should not import direct region stats calculation');
   assert.doesNotMatch(app, /groundTrackBudget/, 'app should not calculate backend sampling budget');

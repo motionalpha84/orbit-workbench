@@ -172,6 +172,7 @@ const state = {
   groundTrackRenderData: null,
   groundTrackRenderPending: false,
   groundTrackRenderError: '',
+  groundTrackHistoryKey: uuid(),
   lastGroundTrackRenderMs: 0,
   frame: 'ECI',
   centerBody: 'earth',
@@ -186,7 +187,7 @@ const state = {
 };
 
 function uuid() {
-  if (crypto?.randomUUID) return crypto.randomUUID();
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `orbit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
@@ -664,9 +665,10 @@ function pausePlayback() {
   renderUi();
 }
 
-function clearGroundTrackHistories() {
+function clearGroundTrackHistories(id = null) {
   state.groundTrackTracks = [];
   state.groundTrackRenderData = null;
+  if (id === null) state.groundTrackHistoryKey = uuid();
   renderGroundTrackStats();
   groundTrackView.setSelectionStats(null);
 }
@@ -1193,6 +1195,7 @@ function groundTrackRenderRequestPayload() {
     startUtcMs: utcMsFromInput(state.simulationStartUtc),
     perturbationModel: state.perturbationModel,
     window: currentGroundTrackWindow(),
+    historyKey: state.groundTrackHistoryKey,
     performance: {
       mode: state.performanceMode,
       memoryGb: state.customMemoryGb,

@@ -42,6 +42,53 @@ test('creates ground-track render data', () => {
   assert.equal(data.tracks[0].current.perturbationModel, 'j3');
 });
 
+test('starts backend ground tracks at the current simulation time without backfilling', () => {
+  const data = createGroundTrackRenderData({
+    historyKey: 'history-starts-current',
+    orbits: [orbitRecord()],
+    elapsedSeconds: 1200,
+    startUtcMs: Date.UTC(2026, 0, 1),
+    perturbationModel: 'two-body',
+    window: { mode: 'revs', pastRevs: 2 },
+    performance: { mode: 'high', memoryGb: 8 },
+  });
+  const track = data.tracks[0];
+
+  assert.equal(track.pastSegments.length, 0);
+  assert.equal(track.currentSegments.length, 1);
+  assert.deepEqual(track.points.map((point) => point.elapsedSeconds), [1200]);
+});
+
+test('keeps backend ground-track history scoped by history key', () => {
+  const record = orbitRecord();
+  createGroundTrackRenderData({
+    historyKey: 'history-scope-a',
+    orbits: [record],
+    elapsedSeconds: 0,
+    startUtcMs: Date.UTC(2026, 0, 1),
+    window: { mode: 'revs', pastRevs: 2 },
+  });
+  const accumulated = createGroundTrackRenderData({
+    historyKey: 'history-scope-a',
+    orbits: [record],
+    elapsedSeconds: 50000,
+    startUtcMs: Date.UTC(2026, 0, 1),
+    window: { mode: 'revs', pastRevs: 2 },
+    performance: { mode: 'high', memoryGb: 8 },
+  });
+  const reset = createGroundTrackRenderData({
+    historyKey: 'history-scope-b',
+    orbits: [record],
+    elapsedSeconds: 50000,
+    startUtcMs: Date.UTC(2026, 0, 1),
+    window: { mode: 'revs', pastRevs: 2 },
+    performance: { mode: 'high', memoryGb: 8 },
+  });
+
+  assert.ok(accumulated.tracks[0].points.length > 1);
+  assert.deepEqual(reset.tracks[0].points.map((point) => point.elapsedSeconds), [50000]);
+});
+
 test('creates region stats and CSV from tracks', () => {
   const data = createGroundTrackRenderData({ orbits: [orbitRecord()] });
   const stats = createGroundTrackRegionStats({

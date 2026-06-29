@@ -170,6 +170,8 @@ test('workbench, assets, settings, and ground-track controls match the new contr
 test('vector calibration static UI contract is present', async () => {
   const html = await readFile('index.html', 'utf8');
   const css = await readFile('styles.css', 'utf8');
+  const app = await readFile('js/app.mjs', 'utf8');
+  const scene = await readFile('js/scene.mjs', 'utf8');
 
   assert.equal(await fileExists('js/vector-calibration.mjs'), true, 'vector calibration solver should exist');
   assert.match(html, /<h3>其他功能<\/h3>/, 'workbench should expose an other-functions panel');
@@ -183,6 +185,17 @@ test('vector calibration static UI contract is present', async () => {
   assert.match(css, /\.calibration-target-row/, 'calibration target row should be styled');
   assert.match(css, /\.calibration-target-row select/, 'target rows should style per-row mode selectors');
   assert.match(css, /\.calibration-result-group/, 'grouped calibration results should be styled');
+  assert.match(app, /calibrateOrbitVectorTargets/, 'app should import vector calibration batch solver');
+  assert.match(app, /calibrationTargets:\s*\[/, 'app should track multiple calibration targets');
+  assert.match(app, /renderCalibrationTargets/, 'app should render target rows');
+  assert.match(app, /addCalibrationTarget/, 'app should add calibration target rows');
+  assert.match(app, /removeCalibrationTarget/, 'app should remove calibration target rows');
+  assert.match(app, /calibrationMarkersFromBatchResult/, 'app should flatten batch hits into scene markers');
+  assert.match(app, /scene\.setCalibrationMarkers/, 'app should send hits to the 3D scene');
+  assert.match(app, /clearVectorCalibration\(\)/, 'orbit lifecycle should clear stale calibration state');
+  assert.doesNotMatch(html, /id="calibration-x"/, 'single-vector x input should be replaced by target rows');
+  assert.match(scene, /targetName/, 'scene marker normalization should carry target names');
+  assert.match(scene, /setCalibrationMarkers/, 'scene should expose calibration marker API');
 });
 
 test('stylesheet has balanced block delimiters', async () => {

@@ -37,6 +37,7 @@ test('normalizes calibration modes and parses finite vectors', () => {
   assert.equal(normalizeCalibrationMode('velocity'), 'velocity');
   assert.equal(normalizeCalibrationMode('other'), 'position');
   assert.deepEqual(parseCalibrationVector({ x: '1', y: 2, z: '3.5' }), { x: 1, y: 2, z: 3.5 });
+  assert.throws(() => parseCalibrationVector({ x: '', y: 0, z: 0 }), /有限数字/);
   assert.throws(() => parseCalibrationVector({ x: 'NaN', y: 0, z: 0 }), /有限数字/);
 });
 

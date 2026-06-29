@@ -6,6 +6,7 @@ const MAX_SAMPLE_COUNT = 720;
 const GOLDEN_RATIO = (Math.sqrt(5) - 1) / 2;
 
 function finiteNumber(value) {
+  if (typeof value === 'string' && value.trim() === '') throw new Error('标定矢量必须填写有限数字。');
   const number = Number(value);
   if (!Number.isFinite(number)) throw new Error('标定矢量必须填写有限数字。');
   return number;

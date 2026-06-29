@@ -69,6 +69,21 @@ test('view methods are safe when no canvas is available', () => {
   assert.equal(view.capturePng({ width: 320, height: 180 }), '');
 });
 
+test('closing an already inactive panel does not redraw', () => {
+  const calls = [];
+  const view = new VelocityCircleView({});
+  view.scene = {};
+  view.camera = {};
+  view.renderer = {
+    render: () => calls.push('render'),
+  };
+
+  view.setPanelOpen(false);
+  view.setPanelOpen(false);
+
+  assert.deepEqual(calls, []);
+});
+
 test('fixed-size PNG capture uses pixel ratio 1 and restores renderer size and camera projection', () => {
   const calls = [];
   const view = new VelocityCircleView({});

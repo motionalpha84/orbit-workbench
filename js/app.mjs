@@ -764,6 +764,10 @@ function activeSideModule() {
   return SIDE_MODULES.has(state.activeModule) ? state.activeModule : null;
 }
 
+function isVelocityCirclePanelOpen() {
+  return state.activeModule === 'velocityCircle' && !['closed', 'minimized'].includes(state.velocityCirclePanel);
+}
+
 function applyModuleState() {
   const active = state.activeModule;
   const sideOpen = Boolean(activeSideModule());
@@ -793,7 +797,7 @@ function applyModuleState() {
   els.closeDrawer.setAttribute('aria-expanded', String(active === 'workbench'));
   els.groundTrackPanel.classList.toggle('is-open', active === 'groundTrack' && state.groundTrackPanel !== 'minimized');
   els.groundTrackPanel.classList.toggle('is-minimized', state.groundTrackPanel === 'minimized');
-  const velocityCircleOpen = active === 'velocityCircle' && state.velocityCirclePanel !== 'minimized';
+  const velocityCircleOpen = isVelocityCirclePanelOpen();
   els.velocityCirclePanel.classList.toggle('is-open', velocityCircleOpen);
   els.velocityCirclePanel.classList.toggle('is-minimized', state.velocityCirclePanel === 'minimized');
   els.velocityCirclePanel.classList.toggle('is-fullscreen', state.velocityCirclePanel === 'fullscreen');
@@ -821,7 +825,7 @@ function openModule(moduleName, { preview = false } = {}) {
   }
 
   if (moduleName === 'groundTrack' && ['closed', 'minimized'].includes(state.groundTrackPanel)) state.groundTrackPanel = 'window';
-  if (moduleName === 'velocityCircle' && ['closed', 'minimized'].includes(state.velocityCirclePanel)) {
+  if (moduleName === 'velocityCircle' && !preview && ['closed', 'minimized'].includes(state.velocityCirclePanel)) {
     state.velocityCirclePanel = 'window';
   }
   if (moduleName === 'console') closeInfoModal();
@@ -833,7 +837,7 @@ function openModule(moduleName, { preview = false } = {}) {
     syncGroundTrackHistories();
     renderGroundTrack({ force: true });
   }
-  if (moduleName === 'velocityCircle') {
+  if (moduleName === 'velocityCircle' && isVelocityCirclePanelOpen()) {
     renderVelocityCircle({ force: true });
   }
   saveState();
@@ -1596,7 +1600,7 @@ function renderGroundTrack(options = {}) {
 }
 
 function renderVelocityCircle(options = {}) {
-  const isOpen = state.activeModule === 'velocityCircle' && !['closed', 'minimized'].includes(state.velocityCirclePanel);
+  const isOpen = isVelocityCirclePanelOpen();
   velocityCircleView.setPanelOpen(isOpen);
   velocityCircleView.setFullscreen(state.velocityCirclePanel === 'fullscreen');
   if (!isOpen) return;
@@ -2067,7 +2071,7 @@ function tick(nowMs) {
   if (state.orbits.length > 0) renderMetrics();
   syncGroundTrackHistories();
   if (state.groundTrackPanel !== 'closed') renderGroundTrack();
-  if (state.velocityCirclePanel !== 'closed') renderVelocityCircle();
+  if (isVelocityCirclePanelOpen()) renderVelocityCircle();
   requestAnimationFrame(tick);
 }
 

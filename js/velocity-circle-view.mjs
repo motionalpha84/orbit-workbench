@@ -211,15 +211,21 @@ export class VelocityCircleView {
   }
 
   setPanelOpen(isPanelOpen) {
-    this.isPanelOpen = Boolean(isPanelOpen);
-    if (this.isPanelOpen) this.resize();
-    this.render();
+    const nextIsPanelOpen = Boolean(isPanelOpen);
+    if (this.isPanelOpen === nextIsPanelOpen) return;
+    this.isPanelOpen = nextIsPanelOpen;
+    if (this.isPanelOpen) {
+      this.resize();
+    } else {
+      this.hideTooltip();
+    }
   }
 
   setFullscreen(isFullscreen) {
-    this.isFullscreen = Boolean(isFullscreen);
+    const nextIsFullscreen = Boolean(isFullscreen);
+    if (this.isFullscreen === nextIsFullscreen) return;
+    this.isFullscreen = nextIsFullscreen;
     this.resize();
-    this.render();
   }
 
   setData(tracks = [], options = {}) {

@@ -201,7 +201,10 @@ test('velocity-circle static UI contract is present', async () => {
   assert.match(app, /renderVelocityCircle/, 'app should render velocity-circle data');
   assert.match(app, /exportVelocityCirclePng/, 'app should export velocity-circle PNG');
   assert.match(app, /function exportVelocityCirclePng[\s\S]*velocityCircleView\.capturePng\(\{ width: 1920, height: 1080 \}\)/, 'velocity-circle PNG export should use fixed 1920x1080 size');
-  assert.match(app, /velocityCirclePanel !== 'closed'/, 'tick should skip closed velocity-circle background work');
+  assert.match(app, /function isVelocityCirclePanelOpen\(\)[\s\S]*state\.activeModule === 'velocityCircle'[\s\S]*!\['closed', 'minimized'\]\.includes\(state\.velocityCirclePanel\)/, 'velocity-circle work should require an actively open panel');
+  assert.match(app, /if \(isVelocityCirclePanelOpen\(\)\) renderVelocityCircle\(\)/, 'tick should skip inactive or minimized velocity-circle work');
+  assert.doesNotMatch(app, /if \(state\.velocityCirclePanel !== 'closed'\) renderVelocityCircle\(\)/, 'tick should not render minimized velocity-circle panels');
+  assert.match(app, /moduleName === 'velocityCircle' && !preview && \['closed', 'minimized'\]\.includes\(state\.velocityCirclePanel\)/, 'hover preview should not promote velocity-circle panel mode');
   assert.match(app, /state\.velocityCircleFilters\[id\] = true/, 'new velocity-circle filters should default on');
 });
 

@@ -251,11 +251,16 @@ export class VelocityCircleView {
   capturePng({ width = null, height = null } = {}) {
     if (!this.renderer || !this.canvas || !this.camera) return '';
 
-    const previousWidth = this.canvas.width;
-    const previousHeight = this.canvas.height;
+    const previousSize = this.renderer.getSize?.(new THREE.Vector2()) ?? new THREE.Vector2(
+      this.canvas.clientWidth || this.canvas.width || 1,
+      this.canvas.clientHeight || this.canvas.height || 1,
+    );
+    const previousPixelRatio = this.renderer.getPixelRatio?.() ?? 1;
     const previousAspect = this.camera.aspect;
+    const hasFixedSize = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
 
-    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    if (hasFixedSize) {
+      this.renderer.setPixelRatio?.(1);
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height, false);
@@ -264,11 +269,11 @@ export class VelocityCircleView {
     this.render();
     const dataUrl = this.renderer.domElement?.toDataURL?.('image/png') ?? '';
 
-    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    if (hasFixedSize) {
+      this.renderer.setPixelRatio?.(previousPixelRatio);
       this.camera.aspect = previousAspect;
       this.camera.updateProjectionMatrix();
-      this.renderer.setSize(previousWidth, previousHeight, false);
-      this.resize();
+      this.renderer.setSize(previousSize.x, previousSize.y, false);
     }
 
     return dataUrl;
@@ -287,10 +292,11 @@ export class VelocityCircleView {
       const referenceOpacity = isMuted ? 0.1 : 0.36;
       const trailOpacity = isMuted ? 0.24 : 0.72;
 
-      const sampleLine = this.makeLine(track.samples ?? [], track.color, referenceOpacity, 1);
+      const velocityHitPayload = buildVelocityHitPayload(track, track.current);
+      const sampleLine = this.makeLine(track.samples ?? [], track.color, referenceOpacity, 1, velocityHitPayload);
       if (sampleLine) this.trackRoot.add(sampleLine);
 
-      const trailLine = this.makeLine(track.trail ?? [], track.color, trailOpacity, 2);
+      const trailLine = this.makeLine(track.trail ?? [], track.color, trailOpacity, 2, velocityHitPayload);
       if (trailLine) this.trackRoot.add(trailLine);
 
       const arrow = this.makeArrow(track);
@@ -312,7 +318,7 @@ export class VelocityCircleView {
     });
   }
 
-  makeLine(points, color, opacity, lineWidth = 1) {
+  makeLine(points, color, opacity, lineWidth = 1, velocityHitPayload = null) {
     const vectors = (Array.isArray(points) ? points : [])
       .map((point) => pointVelocity(point))
       .filter(Boolean)
@@ -327,7 +333,12 @@ export class VelocityCircleView {
       depthWrite: false,
       linewidth: lineWidth,
     });
-    return new THREE.Line(geometry, material);
+    const line = new THREE.Line(geometry, material);
+    if (velocityHitPayload) {
+      line.userData.velocityHit = velocityHitPayload;
+      this.pickTargets.push(line);
+    }
+    return line;
   }
 
   makeEndpoint(track) {
@@ -442,11 +453,18 @@ export class VelocityCircleView {
 
   showTooltip(payload, event) {
     const html = velocityTooltipHtml(payload);
+    const rect = this.canvas?.getBoundingClientRect?.();
+    const width = rect?.width ?? this.canvas?.clientWidth ?? this.canvas?.width ?? 0;
+    const height = rect?.height ?? this.canvas?.clientHeight ?? this.canvas?.height ?? 0;
+    const localX = rect ? (event.clientX ?? 0) - rect.left : (event.clientX ?? 0);
+    const localY = rect ? (event.clientY ?? 0) - rect.top : (event.clientY ?? 0);
+    const tooltipX = clamp(localX + 14, 8, Math.max(8, width - 280));
+    const tooltipY = clamp(localY + 14, 8, Math.max(8, height - 148));
     if (this.tooltip) {
       this.tooltip.innerHTML = html;
       this.tooltip.style.borderColor = payload.color;
-      this.tooltip.style.left = `${Math.max(8, (event.clientX ?? 0) + 14)}px`;
-      this.tooltip.style.top = `${Math.max(8, (event.clientY ?? 0) + 14)}px`;
+      this.tooltip.style.left = `${tooltipX}px`;
+      this.tooltip.style.top = `${tooltipY}px`;
       this.tooltip.hidden = false;
     }
     if (this.readout) {

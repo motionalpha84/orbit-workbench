@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { computeOrbit, propagateOrbit } from '../js/orbit.mjs';
 import {
+  calibrateOrbitVectorTargets,
   calibrateOrbitVectors,
   calibrationResidual,
   normalizeCalibrationMode,
@@ -130,4 +131,145 @@ test('deduplicates periodic boundary hits from the same orbit', () => {
   assert.equal(result.status, 'hit');
   assert.equal(result.hits.length, 1);
   assert.ok(result.hits[0].elapsedSeconds < 1 || Math.abs(result.hits[0].elapsedSeconds - record.orbit.periodSeconds) < 1);
+});
+
+test('batch calibration solves independent named position and velocity targets', () => {
+  const record = orbitRecord({ id: 'mixed-target-orbit', name: 'Mixed Target Orbit' });
+  const positionElapsedSeconds = 1345.25;
+  const velocityElapsedSeconds = 2450.75;
+  const positionTarget = propagateOrbit(record.orbit, positionElapsedSeconds, { perturbationModel: 'two-body' }).positionKm;
+  const velocityTarget = propagateOrbit(record.orbit, velocityElapsedSeconds, { perturbationModel: 'two-body' }).velocityKmS;
+
+  const result = calibrateOrbitVectorTargets([record], {
+    targets: [
+      {
+        id: 'target-position',
+        name: '目标位置A',
+        mode: 'position',
+        vector: positionTarget,
+      },
+      {
+        id: 'target-velocity',
+        name: '近地点速度',
+        mode: 'velocity',
+        vector: velocityTarget,
+      },
+    ],
+    perturbationModel: 'two-body',
+    sampleCount: 128,
+  });
+
+  assert.equal(result.status, 'complete');
+  assert.equal(result.targets.length, 2);
+  assert.equal(result.hits.length, 2);
+  assert.equal(result.targets[0].targetName, '目标位置A');
+  assert.equal(result.targets[0].mode, 'position');
+  assert.equal(result.targets[0].result.status, 'hit');
+  assert.equal(result.targets[1].targetName, '近地点速度');
+  assert.equal(result.targets[1].mode, 'velocity');
+  assert.equal(result.targets[1].result.status, 'hit');
+  assert.ok(result.hits.every((hit) => hit.targetId === 'target-position' || hit.targetId === 'target-velocity'));
+  assert.ok(result.hits.some((hit) => hit.targetName === '目标位置A'));
+  assert.ok(result.hits.some((hit) => hit.targetName === '近地点速度'));
+});
+
+test('batch calibration gives every hit from one target the same target name', () => {
+  const first = orbitRecord({ id: 'same-a', name: 'Same Orbit A' });
+  const second = orbitRecord({ id: 'same-b', name: 'Same Orbit B' });
+  const target = propagateOrbit(first.orbit, 1200, { perturbationModel: 'two-body' }).positionKm;
+
+  const result = calibrateOrbitVectorTargets([first, second], {
+    targets: [
+      {
+        id: 'shared-name-target',
+        name: '共享命名点',
+        mode: 'position',
+        vector: target,
+      },
+    ],
+    perturbationModel: 'two-body',
+    sampleCount: 128,
+  });
+
+  assert.equal(result.status, 'complete');
+  assert.equal(result.targets.length, 1);
+  assert.equal(result.targets[0].result.status, 'hit');
+  assert.equal(result.targets[0].result.hits.length, 2);
+  assert.deepEqual(result.targets[0].result.hits.map((hit) => hit.targetName), ['共享命名点', '共享命名点']);
+  assert.deepEqual(result.hits.map((hit) => hit.targetName), ['共享命名点', '共享命名点']);
+});
+
+test('batch calibration isolates one target input error from valid targets', () => {
+  const record = orbitRecord();
+  const target = propagateOrbit(record.orbit, 800, { perturbationModel: 'two-body' }).positionKm;
+
+  const result = calibrateOrbitVectorTargets([record], {
+    targets: [
+      {
+        id: 'bad-target',
+        name: '坏输入',
+        mode: 'position',
+        vector: { x: 'NaN', y: 0, z: 0 },
+      },
+      {
+        id: 'good-target',
+        name: '好输入',
+        mode: 'position',
+        vector: target,
+      },
+    ],
+    perturbationModel: 'two-body',
+    sampleCount: 96,
+  });
+
+  assert.equal(result.status, 'complete');
+  assert.equal(result.targets.length, 2);
+  assert.equal(result.targets[0].result.status, 'input-error');
+  assert.match(result.targets[0].result.error, /有限数字/);
+  assert.equal(result.targets[1].result.status, 'hit');
+  assert.equal(result.hits.length, 1);
+  assert.equal(result.hits[0].targetId, 'good-target');
+});
+
+test('batch calibration reports no valid targets for an empty target list', () => {
+  const result = calibrateOrbitVectorTargets([orbitRecord()], {
+    targets: [],
+    perturbationModel: 'two-body',
+    sampleCount: 96,
+  });
+
+  assert.equal(result.status, 'no-valid-targets');
+  assert.deepEqual(result.targets, []);
+  assert.deepEqual(result.hits, []);
+});
+
+test('batch calibration keeps duplicate target names separate by target id', () => {
+  const record = orbitRecord({ id: 'duplicate-name-orbit', name: 'Duplicate Name Orbit' });
+  const positionTarget = propagateOrbit(record.orbit, 500, { perturbationModel: 'two-body' }).positionKm;
+  const velocityTarget = propagateOrbit(record.orbit, 1400, { perturbationModel: 'two-body' }).velocityKmS;
+
+  const result = calibrateOrbitVectorTargets([record], {
+    targets: [
+      {
+        id: 'duplicate-a',
+        name: '同名目标',
+        mode: 'position',
+        vector: positionTarget,
+      },
+      {
+        id: 'duplicate-b',
+        name: '同名目标',
+        mode: 'velocity',
+        vector: velocityTarget,
+      },
+    ],
+    perturbationModel: 'two-body',
+    sampleCount: 128,
+  });
+
+  assert.equal(result.status, 'complete');
+  assert.deepEqual(result.targets.map((targetResult) => targetResult.targetId), ['duplicate-a', 'duplicate-b']);
+  assert.deepEqual(result.targets.map((targetResult) => targetResult.targetName), ['同名目标', '同名目标']);
+  assert.ok(result.hits.some((hit) => hit.targetId === 'duplicate-a' && hit.targetName === '同名目标'));
+  assert.ok(result.hits.some((hit) => hit.targetId === 'duplicate-b' && hit.targetName === '同名目标'));
 });

@@ -189,6 +189,54 @@ function sortHits(first, second) {
   return first.elapsedSeconds - second.elapsedSeconds;
 }
 
+function normalizeTargetId(target, index) {
+  const rawId = String(target?.id ?? '').trim();
+  return rawId || `calibration-target-${index + 1}`;
+}
+
+function normalizeTargetName(target, index) {
+  const rawName = String(target?.name ?? '').trim();
+  return rawName || `标定${index + 1}`;
+}
+
+function targetInputError(targetId, targetName, mode, perturbationModel, error) {
+  return {
+    targetId,
+    targetName,
+    mode,
+    result: {
+      status: 'input-error',
+      error,
+      mode,
+      targetVector: null,
+      perturbationModel,
+      hits: [],
+      nearest: null,
+    },
+  };
+}
+
+function decorateStateWithTarget(state, targetId, targetName, mode) {
+  if (!state) return null;
+  return {
+    ...state,
+    targetId,
+    targetName,
+    targetMode: mode,
+  };
+}
+
+function decorateResultWithTarget(result, targetId, targetName, mode) {
+  const hits = Array.isArray(result.hits)
+    ? result.hits.map((hit) => decorateStateWithTarget(hit, targetId, targetName, mode))
+    : [];
+  return {
+    ...result,
+    hits,
+    nearest: decorateStateWithTarget(result.nearest, targetId, targetName, mode),
+  };
+}
+
 export function calibrateOrbitVectors(records = [], options = {}) {
   const mode = normalizeCalibrationMode(options.mode);
   let targetVector;
@@ -261,5 +309,51 @@ export function calibrateOrbitVectors(records = [], options = {}) {
     perturbationModel,
     hits,
     nearest,
+  };
+}
+
+export function calibrateOrbitVectorTargets(records = [], options = {}) {
+  const perturbationModel = normalizePerturbationModel(options.perturbationModel);
+  const sampleCount = options.sampleCount;
+  const targets = Array.isArray(options.targets) ? options.targets : [];
+  const groupedTargets = [];
+  const hits = [];
+  let validTargetCount = 0;
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    const targetId = normalizeTargetId(target, index);
+    const targetName = normalizeTargetName(target, index);
+    const mode = normalizeCalibrationMode(target?.mode);
+    const explicitName = String(target?.name ?? '').trim();
+
+    if (!explicitName) {
+      groupedTargets.push(targetInputError(targetId, targetName, mode, perturbationModel, '标定名称不能为空。'));
+      continue;
+    }
+
+    const result = calibrateOrbitVectors(records, {
+      mode,
+      targetVector: target?.vector,
+      perturbationModel,
+      sampleCount,
+    });
+    const decoratedResult = decorateResultWithTarget(result, targetId, targetName, mode);
+    groupedTargets.push({
+      targetId,
+      targetName,
+      mode,
+      result: decoratedResult,
+    });
+
+    if (result.status !== 'input-error') validTargetCount += 1;
+    hits.push(...decoratedResult.hits);
+  }
+
+  return {
+    status: validTargetCount > 0 ? 'complete' : 'no-valid-targets',
+    perturbationModel,
+    targets: groupedTargets,
+    hits,
   };
 }

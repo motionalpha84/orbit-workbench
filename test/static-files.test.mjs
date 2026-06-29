@@ -177,6 +177,7 @@ test('workbench, assets, settings, and ground-track controls match the new contr
 test('velocity-circle static UI contract is present', async () => {
   const html = await readFile('index.html', 'utf8');
   const css = await readFile('styles.css', 'utf8');
+  const app = await readFile('js/app.mjs', 'utf8');
 
   assert.match(html, /id="velocity-circle-panel"/, 'velocity-circle panel should exist');
   assert.match(html, /aria-label="速度矢量圆"/, 'velocity-circle panel should be labeled');
@@ -191,6 +192,17 @@ test('velocity-circle static UI contract is present', async () => {
   assert.match(css, /\.velocity-circle-panel/, 'CSS should style velocity-circle panel');
   assert.match(css, /\.velocity-circle-panel\.is-fullscreen/, 'CSS should style velocity-circle fullscreen mode');
   assert.match(css, /\.velocity-circle-filter-row/, 'CSS should style velocity-circle filters');
+  assert.match(app, /sampleVelocityCircles/, 'app should import velocity-circle sampling');
+  assert.match(app, /VelocityCircleView/, 'app should import velocity-circle renderer');
+  assert.match(app, /velocityCirclePanel:\s*'closed'/, 'app should track velocity-circle panel state');
+  assert.match(app, /velocityCircleFilters:\s*\{\}/, 'app should track velocity-circle filters');
+  assert.match(app, /setVelocityCirclePanel/, 'app should set velocity-circle panel modes');
+  assert.match(app, /syncVelocityCircleFilters/, 'app should sync velocity-circle filters from visible orbits');
+  assert.match(app, /renderVelocityCircle/, 'app should render velocity-circle data');
+  assert.match(app, /exportVelocityCirclePng/, 'app should export velocity-circle PNG');
+  assert.match(app, /function exportVelocityCirclePng[\s\S]*velocityCircleView\.capturePng\(\{ width: 1920, height: 1080 \}\)/, 'velocity-circle PNG export should use fixed 1920x1080 size');
+  assert.match(app, /velocityCirclePanel !== 'closed'/, 'tick should skip closed velocity-circle background work');
+  assert.match(app, /state\.velocityCircleFilters\[id\] = true/, 'new velocity-circle filters should default on');
 });
 
 test('stylesheet has balanced block delimiters', async () => {

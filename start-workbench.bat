@@ -4,7 +4,7 @@ setlocal
 set "APP_DIR=%~dp0"
 cd /d "%APP_DIR%"
 
-if not defined PORT set "PORT=14730"
+if not defined PORT set "PORT=4173"
 if not defined OPEN_BROWSER set "OPEN_BROWSER=1"
 set "HOST=127.0.0.1"
 set "URL=http://%HOST%:%PORT%"

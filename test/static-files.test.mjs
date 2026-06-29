@@ -205,7 +205,7 @@ test('velocity-circle static UI contract is present', async () => {
   assert.match(app, /if \(isVelocityCirclePanelOpen\(\)\) renderVelocityCircle\(\)/, 'tick should skip inactive or minimized velocity-circle work');
   assert.doesNotMatch(app, /if \(state\.velocityCirclePanel !== 'closed'\) renderVelocityCircle\(\)/, 'tick should not render minimized velocity-circle panels');
   const throttledVelocityCircleBranch = app.match(
-    /function renderVelocityCircle\(options = \{\}\) \{[\s\S]*?if \(!options\.force && nowMs - state\.lastVelocityCircleRenderMs < minIntervalMs\) \{([\s\S]*?)\n  \}\n\n  state\.lastVelocityCircleRenderMs = nowMs/,
+    /function renderVelocityCircle\(options = \{\}\) \{[\s\S]*?if \(!options\.force && nowMs - state\.lastVelocityCircleRenderMs < minIntervalMs\) \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  state\.lastVelocityCircleRenderMs = nowMs/,
   )?.[1] ?? '';
   assert.notEqual(throttledVelocityCircleBranch, '', 'velocity-circle render throttle branch should be discoverable');
   assert.doesNotMatch(throttledVelocityCircleBranch, /velocityCircleView\.setData|rebuildVelocityCircleTracks/, 'throttled velocity-circle ticks should not rebuild track geometry');

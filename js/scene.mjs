@@ -43,6 +43,9 @@ export function normalizeCalibrationMarkers(markers = []) {
         z: Number(marker.positionKm.z),
       };
       return {
+        targetId: marker.targetId || '',
+        targetName: marker.targetName || '未命名标定',
+        targetMode: marker.targetMode === 'velocity' ? 'velocity' : 'position',
         orbitId: marker.orbitId,
         orbitName: marker.orbitName || '未命名轨道',
         color: marker.color || '#8bbfba',

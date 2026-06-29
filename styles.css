@@ -1420,6 +1420,144 @@ select {
   margin-bottom: 12px;
 }
 
+.other-functions-panel {
+  margin-bottom: 12px;
+}
+
+.calibration-tool {
+  display: grid;
+  gap: 10px;
+}
+
+.calibration-tool-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.calibration-tool-header h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.calibration-tool-header span {
+  color: var(--subtle);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.calibration-mode-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.calibration-mode-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(5, 14, 20, 0.58);
+  font-size: 12px;
+}
+
+.calibration-mode-button.is-active {
+  color: var(--text);
+  border-color: rgba(86, 140, 135, 0.82);
+  background: rgba(35, 80, 76, 0.72);
+  box-shadow: 0 0 18px rgba(86, 140, 135, 0.18);
+}
+
+.calibration-vector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calibration-vector-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.calibration-vector-grid input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
+  color: var(--text);
+  background: rgba(5, 14, 20, 0.8);
+  font-family: var(--mono);
+}
+
+.calibration-vector-grid input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(86, 140, 135, 0.16);
+}
+
+.calibration-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.calibration-results {
+  display: grid;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid rgba(150, 190, 184, 0.16);
+  border-radius: 6px;
+  padding: 10px;
+  color: var(--subtle);
+  background: rgba(5, 14, 20, 0.36);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.calibration-result-summary {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.calibration-result-item {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid rgba(148, 176, 190, 0.12);
+  padding-top: 8px;
+}
+
+.calibration-result-item strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.calibration-result-item dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  margin: 0;
+}
+
+.calibration-result-item dt {
+  color: var(--subtle);
+}
+
+.calibration-result-item dd {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--mono);
+  text-align: right;
+  word-break: break-word;
+}
+
+.calibration-result-item.is-nearest {
+  border-color: rgba(242, 222, 121, 0.28);
+}
+
 .toggle-row {
   display: flex;
   align-items: center;

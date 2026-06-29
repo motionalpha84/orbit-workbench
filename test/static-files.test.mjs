@@ -166,6 +166,33 @@ test('workbench, assets, settings, and ground-track controls match the new contr
   assert.match(view, /highlightEquator/, 'renderer should support equator highlighting');
 });
 
+test('vector calibration static UI contract is present', async () => {
+  const html = await readFile('index.html', 'utf8');
+  const css = await readFile('styles.css', 'utf8');
+  const app = await readFile('js/app.mjs', 'utf8');
+  const scene = await readFile('js/scene.mjs', 'utf8');
+
+  assert.equal(await fileExists('js/vector-calibration.mjs'), true, 'vector calibration solver should exist');
+  assert.match(html, /<h3>其他功能<\/h3>/, 'workbench should expose an other-functions panel');
+  assert.match(html, /位置\/速度标定/, 'calibration tool title should exist');
+  assert.match(html, /data-calibration-mode="position"/, 'position calibration mode button should exist');
+  assert.match(html, /data-calibration-mode="velocity"/, 'velocity calibration mode button should exist');
+  assert.match(html, /id="calibration-x"/, 'x vector input should exist');
+  assert.match(html, /id="calibration-y"/, 'y vector input should exist');
+  assert.match(html, /id="calibration-z"/, 'z vector input should exist');
+  assert.match(html, /id="calibration-submit"/, 'calibration submit button should exist');
+  assert.match(html, /id="calibration-clear"/, 'calibration clear button should exist');
+  assert.match(html, /id="calibration-results"/, 'calibration results container should exist');
+  assert.match(css, /\.calibration-tool/, 'calibration tool should be styled');
+  assert.match(css, /\.calibration-mode-button\.is-active/, 'active mode should be styled');
+  assert.match(css, /\.calibration-result-item/, 'result items should be styled');
+  assert.match(app, /calibrateOrbitVectors/, 'app should import vector calibration solver');
+  assert.match(app, /runVectorCalibration/, 'app should run vector calibration');
+  assert.match(app, /clearVectorCalibration/, 'app should clear vector calibration');
+  assert.match(app, /renderCalibrationResults/, 'app should render vector calibration results');
+  assert.match(scene, /setCalibrationMarkers/, 'scene should expose calibration marker API');
+});
+
 test('stylesheet has balanced block delimiters', async () => {
   const css = await readFile('styles.css', 'utf8');
   const opens = css.match(/\{/g)?.length ?? 0;

@@ -384,6 +384,42 @@
           <label class="toggle-row"><input id="toggle-radius" type="checkbox" checked /> 赤道面</label>
           <label class="toggle-row"><input id="toggle-reference" type="checkbox" checked /> 完整轨道淡参考</label>
         </section>
+
+        <section class="panel other-functions-panel">
+          <div class="panel-title">
+            <h3>其他功能</h3>
+            <span>轨道分析</span>
+          </div>
+          <div class="calibration-tool" aria-label="位置/速度标定">
+            <div class="calibration-tool-header">
+              <h4>位置/速度标定</h4>
+              <span id="calibration-unit">ECI · km</span>
+            </div>
+            <div class="calibration-mode-control" role="group" aria-label="标定模式">
+              <button class="calibration-mode-button is-active" type="button" data-calibration-mode="position">位置标定</button>
+              <button class="calibration-mode-button" type="button" data-calibration-mode="velocity">速度标定</button>
+            </div>
+            <div class="calibration-vector-grid">
+              <label>
+                <span>x</span>
+                <input id="calibration-x" type="number" step="any" inputmode="decimal" autocomplete="off" />
+              </label>
+              <label>
+                <span>y</span>
+                <input id="calibration-y" type="number" step="any" inputmode="decimal" autocomplete="off" />
+              </label>
+              <label>
+                <span>z</span>
+                <input id="calibration-z" type="number" step="any" inputmode="decimal" autocomplete="off" />
+              </label>
+            </div>
+            <div class="calibration-actions">
+              <button id="calibration-submit" class="primary-action" type="button">标定</button>
+              <button id="calibration-clear" class="secondary-action" type="button">清除</button>
+            </div>
+            <div id="calibration-results" class="calibration-results" aria-live="polite">输入 ECI 矢量后点击标定。</div>
+          </div>
+        </section>
       </aside>
 
       <aside id="assets-panel" class="side-module-panel assets-panel" data-module-panel="assets" aria-label="资产">

@@ -24,15 +24,11 @@ import {
   updateGroundTrackHistory,
 } from './groundtrack-history.mjs';
 import { GroundTrackView, formatUtc } from './groundtrack-view.mjs';
-import {
-  sampleVelocityCircles,
-} from './velocity-circle.mjs';
-import { VelocityCircleView } from './velocity-circle-view.mjs';
 
 const STORAGE_KEY = 'eci-orbit-workbench:v1';
 const ASSET_LIBRARY_KEY = 'eci-orbit-workbench:asset-groups:v1';
 const SIDE_MODULES = new Set(['workbench', 'assets', 'settings']);
-const BOTTOM_MODULES = new Set(['groundTrack', 'velocityCircle', 'console']);
+const BOTTOM_MODULES = new Set(['groundTrack', 'console']);
 
 const els = {
   body: document.body,
@@ -91,19 +87,10 @@ const els = {
   groundTrackHighlightLatitude: document.querySelector('#ground-track-highlight-latitude'),
   groundTrackHighlightEquator: document.querySelector('#ground-track-highlight-equator'),
   groundTrackCursorGuides: document.querySelector('#ground-track-cursor-guides'),
-  velocityCirclePanel: document.querySelector('#velocity-circle-panel'),
-  velocityCircleModeToggle: document.querySelector('#velocity-circle-mode-toggle'),
-  velocityCircleMinimize: document.querySelector('#velocity-circle-minimize'),
-  velocityCircleClose: document.querySelector('#velocity-circle-close'),
-  velocityCircleCanvas: document.querySelector('#velocity-circle-canvas'),
-  velocityCircleTooltip: document.querySelector('#velocity-circle-tooltip'),
-  velocityCircleFilterList: document.querySelector('#velocity-circle-filter-list'),
-  velocityCircleReadout: document.querySelector('#velocity-circle-readout'),
   performanceMode: document.querySelector('#ground-track-performance-mode'),
   customMemory: document.querySelector('#ground-track-custom-memory'),
   exportNamePrefix: document.querySelector('#export-name-prefix'),
   exportGroundTrackPng: document.querySelector('#export-ground-track-png'),
-  exportVelocityCirclePng: document.querySelector('#export-velocity-circle-png'),
   assetDirtyState: document.querySelector('#asset-dirty-state'),
   assetGroupName: document.querySelector('#asset-group-name'),
   assetSaveGroup: document.querySelector('#asset-save-group'),
@@ -141,11 +128,6 @@ const groundTrackView = new GroundTrackView({
   tooltip: els.groundTrackTooltip,
   selectionSummary: els.groundTrackSelectionSummary,
 });
-const velocityCircleView = new VelocityCircleView({
-  canvas: els.velocityCircleCanvas,
-  tooltip: els.velocityCircleTooltip,
-  readout: els.velocityCircleReadout,
-});
 
 const state = {
   orbits: [],
@@ -160,7 +142,6 @@ const state = {
   modulePins: {
     workbench: true,
     groundTrack: false,
-    velocityCircle: false,
     assets: false,
     info: false,
     console: false,
@@ -176,11 +157,6 @@ const state = {
   simulationStartUtc: '',
   groundTrackPanel: 'closed',
   groundTrackFilters: {},
-  velocityCirclePanel: 'closed',
-  velocityCircleFilters: {},
-  velocityCircleTracks: [],
-  lastVelocityCircleRenderMs: 0,
-  velocityCircleExportNamePrefix: 'velocity-circle',
   groundTrackWindow: {
     mode: 'revs',
     pastRevs: 2,
@@ -296,7 +272,6 @@ function serializeWorkbenchSnapshot() {
     simulationStartUtc: state.simulationStartUtc,
     overlays: { ...state.overlays },
     groundTrackFilters: { ...state.groundTrackFilters },
-    velocityCircleFilters: { ...state.velocityCircleFilters },
     groundTrackWindow: { ...state.groundTrackWindow },
     groundTrackOptions: { ...state.groundTrackOptions },
     orbits: state.orbits.map(serializeOrbit),
@@ -330,9 +305,6 @@ function applyWorkbenchSnapshot(snapshot = {}) {
   if (snapshot.groundTrackFilters && typeof snapshot.groundTrackFilters === 'object') {
     state.groundTrackFilters = { ...snapshot.groundTrackFilters };
   }
-  if (snapshot.velocityCircleFilters && typeof snapshot.velocityCircleFilters === 'object') {
-    state.velocityCircleFilters = { ...snapshot.velocityCircleFilters };
-  }
   if (snapshot.groundTrackWindow && typeof snapshot.groundTrackWindow === 'object') {
     state.groundTrackWindow = {
       ...state.groundTrackWindow,
@@ -344,7 +316,6 @@ function applyWorkbenchSnapshot(snapshot = {}) {
     state.groundTrackOptions = { ...state.groundTrackOptions, ...snapshot.groundTrackOptions };
   }
   clearGroundTrackHistories();
-  state.velocityCircleTracks = [];
   resetForm();
 }
 
@@ -403,9 +374,6 @@ function saveState() {
     simulationStartUtc: state.simulationStartUtc,
     groundTrackPanel: state.groundTrackPanel,
     groundTrackFilters: state.groundTrackFilters,
-    velocityCirclePanel: state.velocityCirclePanel,
-    velocityCircleFilters: state.velocityCircleFilters,
-    velocityCircleExportNamePrefix: state.velocityCircleExportNamePrefix,
     groundTrackWindow: state.groundTrackWindow,
     groundTrackOptions: state.groundTrackOptions,
     performanceMode: state.performanceMode,
@@ -451,15 +419,6 @@ function restoreState() {
     }
     if (payload?.groundTrackFilters && typeof payload.groundTrackFilters === 'object') {
       state.groundTrackFilters = { ...payload.groundTrackFilters };
-    }
-    if (['closed', 'window', 'fullscreen', 'minimized'].includes(payload?.velocityCirclePanel)) {
-      state.velocityCirclePanel = payload.velocityCirclePanel;
-    }
-    if (payload?.velocityCircleFilters && typeof payload.velocityCircleFilters === 'object') {
-      state.velocityCircleFilters = { ...payload.velocityCircleFilters };
-    }
-    if (typeof payload?.velocityCircleExportNamePrefix === 'string') {
-      state.velocityCircleExportNamePrefix = payload.velocityCircleExportNamePrefix;
     }
     if (payload?.groundTrackWindow && typeof payload.groundTrackWindow === 'object') {
       const legacyWindow = payload.version !== 2 || typeof payload.groundTrackWindow.timeUnit !== 'string';
@@ -672,7 +631,6 @@ function clearGroundTrackHistories(id = null) {
 function removeOrbit(id) {
   state.orbits = state.orbits.filter((orbit) => orbit.id !== id);
   clearGroundTrackHistories(id);
-  state.velocityCircleTracks = [];
   setSelectedOrbitIds(state.selectedIds.filter((selectedId) => selectedId !== id));
   if (state.editingId === id) resetForm();
   markSceneDirty();
@@ -685,7 +643,6 @@ function toggleOrbitVisibility(id) {
   if (!record) return;
   record.visible = !record.visible;
   if (!record.visible) clearGroundTrackHistories(id);
-  state.velocityCircleTracks = [];
   markSceneDirty();
   syncGroundTrackHistories();
   renderUi();
@@ -764,16 +721,12 @@ function activeSideModule() {
   return SIDE_MODULES.has(state.activeModule) ? state.activeModule : null;
 }
 
-function isVelocityCirclePanelOpen() {
-  return state.activeModule === 'velocityCircle' && !['closed', 'minimized'].includes(state.velocityCirclePanel);
-}
-
 function applyModuleState() {
   const active = state.activeModule;
   const sideOpen = Boolean(activeSideModule());
   els.body.classList.toggle('side-panel-open', sideOpen);
   els.body.classList.toggle('module-previewing', Boolean(state.previewModule));
-  for (const moduleName of ['workbench', 'assets', 'settings', 'groundTrack', 'velocityCircle', 'console']) {
+  for (const moduleName of ['workbench', 'assets', 'settings', 'groundTrack', 'console']) {
     els.body.classList.toggle(`module-${moduleName}-open`, active === moduleName);
   }
 
@@ -797,16 +750,10 @@ function applyModuleState() {
   els.closeDrawer.setAttribute('aria-expanded', String(active === 'workbench'));
   els.groundTrackPanel.classList.toggle('is-open', active === 'groundTrack' && state.groundTrackPanel !== 'minimized');
   els.groundTrackPanel.classList.toggle('is-minimized', state.groundTrackPanel === 'minimized');
-  const velocityCircleOpen = isVelocityCirclePanelOpen();
-  els.velocityCirclePanel.classList.toggle('is-open', velocityCircleOpen);
-  els.velocityCirclePanel.classList.toggle('is-minimized', state.velocityCirclePanel === 'minimized');
-  els.velocityCirclePanel.classList.toggle('is-fullscreen', state.velocityCirclePanel === 'fullscreen');
   els.consolePanel.classList.toggle('is-open', active === 'console');
   els.infoModal.hidden = active !== 'info';
   groundTrackView.setPanelOpen(active === 'groundTrack' && state.groundTrackPanel !== 'minimized');
   groundTrackView.setFullscreen(state.groundTrackPanel === 'fullscreen');
-  velocityCircleView.setPanelOpen(velocityCircleOpen);
-  velocityCircleView.setFullscreen(state.velocityCirclePanel === 'fullscreen');
 }
 
 function openModule(moduleName, { preview = false } = {}) {
@@ -825,9 +772,6 @@ function openModule(moduleName, { preview = false } = {}) {
   }
 
   if (moduleName === 'groundTrack' && ['closed', 'minimized'].includes(state.groundTrackPanel)) state.groundTrackPanel = 'window';
-  if (moduleName === 'velocityCircle' && !preview && ['closed', 'minimized'].includes(state.velocityCirclePanel)) {
-    state.velocityCirclePanel = 'window';
-  }
   if (moduleName === 'console') closeInfoModal();
   if (moduleName === 'info') {
     state.groundTrackPanel = state.groundTrackPanel === 'minimized' ? 'minimized' : state.groundTrackPanel;
@@ -837,9 +781,6 @@ function openModule(moduleName, { preview = false } = {}) {
     syncGroundTrackHistories();
     renderGroundTrack({ force: true });
   }
-  if (moduleName === 'velocityCircle' && isVelocityCirclePanelOpen()) {
-    renderVelocityCircle({ force: true });
-  }
   saveState();
 }
 
@@ -847,10 +788,6 @@ function closeActiveModule() {
   if (!state.activeModule) return;
   if (state.activeModule === 'groundTrack') {
     setGroundTrackPanel('closed');
-    return;
-  }
-  if (state.activeModule === 'velocityCircle') {
-    setVelocityCirclePanel('closed');
     return;
   }
   if (state.activeModule === 'info') closeInfoModal();
@@ -888,10 +825,6 @@ function toggleModuleFromSidebar(moduleName) {
   state.hoverPreviewTimer = null;
   if (moduleName === 'groundTrack' && state.groundTrackPanel === 'minimized') {
     setGroundTrackPanel('window', { confirmClose: false });
-    return;
-  }
-  if (moduleName === 'velocityCircle' && state.velocityCirclePanel === 'minimized') {
-    setVelocityCirclePanel('window', { confirmClose: false });
     return;
   }
   if (state.activeModule === moduleName && !state.previewModule) {
@@ -1197,84 +1130,6 @@ function renderGroundTrackFilters() {
   }
 }
 
-function velocityCircleSampleCount(budget) {
-  return Math.max(36, Math.min(360, Math.floor(Number(budget.groundTrackSamplesPerRev) || 160)));
-}
-
-function velocityCircleTrailSampleCount(budget) {
-  return Math.max(8, Math.min(48, Math.floor(velocityCircleSampleCount(budget) / 6)));
-}
-
-function syncVelocityCircleFilters() {
-  const visibleIds = new Set(state.orbits.filter((orbit) => orbit.visible).map((orbit) => orbit.id));
-  for (const id of Object.keys(state.velocityCircleFilters)) {
-    if (!visibleIds.has(id)) delete state.velocityCircleFilters[id];
-  }
-  for (const id of visibleIds) {
-    if (typeof state.velocityCircleFilters[id] !== 'boolean') state.velocityCircleFilters[id] = true;
-  }
-}
-
-function activeVelocityCircleRecords(budget) {
-  syncVelocityCircleFilters();
-  const maxTracks = Math.max(1, Math.floor(Number(budget.mapCacheTracks) || state.orbits.length || 1));
-  return state.orbits
-    .filter((orbit) => orbit.visible && state.velocityCircleFilters[orbit.id] !== false)
-    .slice(0, maxTracks);
-}
-
-function rebuildVelocityCircleTracks(records = null) {
-  const budget = currentGroundTrackBudget();
-  const activeRecords = records ?? activeVelocityCircleRecords(budget);
-  state.velocityCircleTracks = sampleVelocityCircles(activeRecords, {
-    elapsedSeconds: state.elapsedSeconds,
-    perturbationModel: state.perturbationModel,
-    sampleCount: velocityCircleSampleCount(budget),
-    trailSampleCount: velocityCircleTrailSampleCount(budget),
-  });
-  return state.velocityCircleTracks;
-}
-
-function renderVelocityCircleFilters() {
-  syncVelocityCircleFilters();
-  els.velocityCircleFilterList.innerHTML = '';
-  const visibleOrbits = state.orbits.filter((orbit) => orbit.visible);
-  if (visibleOrbits.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-list';
-    empty.textContent = '暂无可见轨道';
-    els.velocityCircleFilterList.append(empty);
-    return;
-  }
-
-  for (const record of visibleOrbits) {
-    const label = document.createElement('label');
-    label.className = 'velocity-circle-filter-row';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = state.velocityCircleFilters[record.id] !== false;
-    input.dataset.velocityCircleFilter = record.id;
-
-    const name = document.createElement('span');
-    name.textContent = record.name;
-
-    const swatch = document.createElement('span');
-    swatch.className = 'velocity-circle-color-swatch';
-    swatch.style.color = record.color;
-
-    input.addEventListener('change', () => {
-      state.velocityCircleFilters[record.id] = input.checked;
-      markSceneDirty();
-      renderVelocityCircle({ force: true });
-      saveState();
-    });
-
-    label.append(input, name, swatch);
-    els.velocityCircleFilterList.append(label);
-  }
-}
-
 function currentGroundTrackWindow() {
   return state.groundTrackWindow.mode === 'time'
     ? {
@@ -1498,7 +1353,6 @@ function clearCurrentSceneWithConfirmation() {
   state.currentAssetId = null;
   state.isSceneDirty = false;
   clearGroundTrackHistories();
-  state.velocityCircleTracks = [];
   resetForm();
   renderUi();
   saveState();
@@ -1545,34 +1399,6 @@ function setGroundTrackPanel(mode, { confirmClose = true } = {}) {
   saveState();
 }
 
-function shouldConfirmVelocityCircleClose() {
-  return state.isPlaying && Object.values(state.velocityCircleFilters).some(Boolean);
-}
-
-function setVelocityCirclePanel(mode, { confirmClose = true } = {}) {
-  const nextMode = ['window', 'fullscreen', 'minimized'].includes(mode) ? mode : 'closed';
-  if (nextMode === 'closed' && confirmClose && shouldConfirmVelocityCircleClose()) {
-    const confirmed = window.confirm('当前仿真正在运行。关闭速度圆模块将停止该模块更新，是否继续？');
-    if (!confirmed) return;
-  }
-  state.velocityCirclePanel = nextMode;
-  if (nextMode === 'closed') {
-    state.velocityCircleTracks = [];
-    if (state.activeModule === 'velocityCircle') {
-      state.activeModule = null;
-      state.committedModule = null;
-    }
-  } else {
-    state.activeModule = 'velocityCircle';
-    state.committedModule = 'velocityCircle';
-  }
-  applyModuleState();
-  if (!['closed', 'minimized'].includes(state.velocityCirclePanel)) {
-    requestAnimationFrame(() => renderVelocityCircle({ force: true }));
-  }
-  saveState();
-}
-
 function renderGroundTrack(options = {}) {
   const isOpen = state.activeModule === 'groundTrack' && !['closed', 'minimized'].includes(state.groundTrackPanel);
   groundTrackView.setPanelOpen(isOpen);
@@ -1599,28 +1425,6 @@ function renderGroundTrack(options = {}) {
   });
 }
 
-function renderVelocityCircle(options = {}) {
-  const isOpen = isVelocityCirclePanelOpen();
-  velocityCircleView.setPanelOpen(isOpen);
-  velocityCircleView.setFullscreen(state.velocityCirclePanel === 'fullscreen');
-  if (!isOpen) return;
-
-  const nowMs = performance.now();
-  const minIntervalMs = state.isPlaying ? 180 : 700;
-  if (!options.force && nowMs - state.lastVelocityCircleRenderMs < minIntervalMs) {
-    velocityCircleView.render();
-    return;
-  }
-
-  state.lastVelocityCircleRenderMs = nowMs;
-  rebuildVelocityCircleTracks();
-  velocityCircleView.setData(state.velocityCircleTracks, {
-    selectedIds: state.selectedIds,
-    elapsedSeconds: state.elapsedSeconds,
-    isPlaying: state.isPlaying,
-  });
-}
-
 function exportGroundTrackPng() {
   syncGroundTrackHistories();
   rebuildGroundTrackTracksFromCache();
@@ -1632,19 +1436,6 @@ function exportGroundTrackPng() {
   const png = groundTrackView.capturePng({ width: 1920, height: 1080 });
   const prefix = (state.exportNamePrefix || 'ground-track').trim() || 'ground-track';
   downloadDataUrl(`${prefix}-${currentTimestampLabel()}.png`, png);
-}
-
-function exportVelocityCirclePng() {
-  const previousTracks = state.velocityCircleTracks;
-  rebuildVelocityCircleTracks();
-  velocityCircleView.setData(state.velocityCircleTracks, {
-    selectedIds: state.selectedIds,
-    elapsedSeconds: state.elapsedSeconds,
-    isPlaying: false,
-  });
-  const png = velocityCircleView.capturePng({ width: 1920, height: 1080 });
-  state.velocityCircleTracks = previousTracks.length > 0 ? previousTracks : state.velocityCircleTracks;
-  downloadDataUrl(`${state.velocityCircleExportNamePrefix}-${currentTimestampLabel()}.png`, png);
 }
 
 function loadImageFromDataUrl(dataUrl) {
@@ -1712,11 +1503,9 @@ function renderUi() {
   currentGroundTrackBudget();
   applyGroundTrackPanelState();
   renderGroundTrackFilters();
-  renderVelocityCircleFilters();
   renderAssetLibrary();
   syncGroundTrackHistories();
   renderGroundTrack({ force: true });
-  renderVelocityCircle({ force: true });
 }
 
 function downloadText(filename, text, type = 'application/json') {
@@ -1760,7 +1549,6 @@ async function importJson(file) {
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
-    state.velocityCircleTracks = [];
     renderUi();
     saveState();
   } catch (error) {
@@ -1786,7 +1574,6 @@ async function importTxt(file) {
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
-    state.velocityCircleTracks = [];
     resetForm();
     renderUi();
     saveState();
@@ -1803,7 +1590,7 @@ function bindEvents() {
     if (!(target instanceof Element)) return;
     if (!target.closest('.status-card')) closeStatusCards();
     if (!target.closest('#simulation-run-control')) setRunLimitMenuOpen(false);
-    const moduleSurface = target.closest('.side-module-panel, .ground-track-panel, .velocity-circle-panel, .bottom-module-panel, .module-sidebar, .info-dialog, #simulation-run-control, .bottom-console');
+    const moduleSurface = target.closest('.side-module-panel, .ground-track-panel, .bottom-module-panel, .module-sidebar, .info-dialog, #simulation-run-control, .bottom-console');
     if (!moduleSurface && state.activeModule && !state.modulePins[state.activeModule]) closeActiveModule();
   });
 
@@ -1861,7 +1648,6 @@ function bindEvents() {
       if (state.perturbationModel !== button.dataset.perturbationModel) {
         state.perturbationModel = button.dataset.perturbationModel;
         clearGroundTrackHistories();
-        state.velocityCircleTracks = [];
         markSceneDirty();
       }
       renderUi();
@@ -1895,10 +1681,8 @@ function bindEvents() {
       if (existingIndex >= 0) {
         state.orbits.splice(existingIndex, 1, record);
         clearGroundTrackHistories(record.id);
-        state.velocityCircleTracks = [];
       } else {
         state.orbits.push(record);
-        state.velocityCircleTracks = [];
       }
       setSelectedOrbitIds([...state.selectedIds.filter((id) => id !== record.id), record.id], { currentId: record.id });
       markSceneDirty();
@@ -1948,12 +1732,6 @@ function bindEvents() {
   els.groundTrackMinimize.addEventListener('click', () => setGroundTrackPanel('minimized', { confirmClose: false }));
   els.groundTrackClose.addEventListener('click', () => setGroundTrackPanel('closed'));
   els.groundTrackResetView.addEventListener('click', () => groundTrackView.resetView());
-  els.velocityCircleModeToggle.addEventListener('click', () => {
-    setVelocityCirclePanel(state.velocityCirclePanel === 'fullscreen' ? 'window' : 'fullscreen');
-  });
-  els.velocityCircleMinimize.addEventListener('click', () => setVelocityCirclePanel('minimized', { confirmClose: false }));
-  els.velocityCircleClose.addEventListener('click', () => setVelocityCirclePanel('closed'));
-  els.exportVelocityCirclePng.addEventListener('click', exportVelocityCirclePng);
   els.simulationStartUtc.addEventListener('change', () => {
     state.simulationStartUtc = els.simulationStartUtc.value || utcDatetimeLocalValue(new Date());
     markSceneDirty();
@@ -2038,8 +1816,6 @@ function bindEvents() {
     scene.resize();
     groundTrackView.resize();
     renderGroundTrack({ force: true });
-    velocityCircleView.resize();
-    renderVelocityCircle({ force: true });
   });
   groundTrackView.setRegionSelectedCallback((bounds) => {
     const stats = groundTrackRegionStats(state.groundTrackTracks, bounds);
@@ -2067,7 +1843,6 @@ function tick(nowMs) {
   if (state.orbits.length > 0) renderMetrics();
   syncGroundTrackHistories();
   if (state.groundTrackPanel !== 'closed') renderGroundTrack();
-  if (isVelocityCirclePanelOpen()) renderVelocityCircle();
   requestAnimationFrame(tick);
 }
 

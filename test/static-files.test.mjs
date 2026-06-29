@@ -19,8 +19,6 @@ test('static app entrypoint uses local offline assets and required modules', asy
   assert.equal(await fileExists('js/groundtrack.mjs'), true, 'ground-track math module should exist');
   assert.equal(await fileExists('js/groundtrack-history.mjs'), true, 'ground-track history module should exist');
   assert.equal(await fileExists('js/groundtrack-view.mjs'), true, 'ground-track map renderer should exist');
-  assert.equal(await fileExists('js/velocity-circle.mjs'), true, 'velocity-circle math module should exist');
-  assert.equal(await fileExists('js/velocity-circle-view.mjs'), true, 'velocity-circle renderer should exist');
   assert.equal(await fileExists('vendor/three.module.js'), true, 'Three.js should be vendored locally');
   assert.equal(await fileExists('assets/textures/earth_blue_marble_topo_5400.jpg'), true, 'earth texture should be local');
   assert.equal(await fileExists('assets/maps/dark-world-map.svg'), true, 'offline dark world map should be local');
@@ -38,14 +36,9 @@ test('right sidebar module architecture is present', async () => {
   const css = await readFile('styles.css', 'utf8');
   const app = await readFile('js/app.mjs', 'utf8');
 
-  for (const moduleName of ['workbench', 'groundTrack', 'velocityCircle', 'assets', 'info', 'console', 'settings']) {
+  for (const moduleName of ['workbench', 'groundTrack', 'assets', 'info', 'console', 'settings']) {
     assert.match(html, new RegExp(`data-module-nav="${moduleName}"`), `${moduleName} nav button should exist`);
   }
-  const groundTrackIndex = html.indexOf('data-module-nav="groundTrack"');
-  const velocityCircleIndex = html.indexOf('data-module-nav="velocityCircle"');
-  const assetsIndex = html.indexOf('data-module-nav="assets"');
-  assert.ok(groundTrackIndex >= 0 && velocityCircleIndex > groundTrackIndex, 'velocity circle nav should follow ground-track nav');
-  assert.ok(assetsIndex > velocityCircleIndex, 'assets nav should follow velocity circle nav');
   assert.match(html, /module-sidebar/, 'right module sidebar should exist');
   assert.match(html, /data-module-panel="workbench"/, 'workbench should be a side module panel');
   assert.match(html, /data-module-panel="assets"/, 'assets should be a side module panel');
@@ -54,7 +47,6 @@ test('right sidebar module architecture is present', async () => {
   assert.match(html, /id="console-panel"/, 'console should open as a bottom panel');
   assert.match(html, /data-module-pin="workbench"/, 'workbench should have a pin button');
   assert.match(html, /data-module-pin="groundTrack"/, 'ground-track panel should have a pin button');
-  assert.match(html, /data-module-pin="velocityCircle"/, 'velocity-circle panel should have a pin button');
   assert.match(html, /data-module-pin="assets"/, 'assets should have a pin button');
   assert.match(html, /data-module-pin="settings"/, 'settings should have a pin button');
   assert.match(html, /class="button-icon pin-icon"/, 'pin buttons should use the optimized pin icon');
@@ -172,45 +164,6 @@ test('workbench, assets, settings, and ground-track controls match the new contr
   assert.match(view, /highlightLongitude/, 'renderer should support longitude highlighting');
   assert.match(view, /highlightLatitude/, 'renderer should support latitude highlighting');
   assert.match(view, /highlightEquator/, 'renderer should support equator highlighting');
-});
-
-test('velocity-circle static UI contract is present', async () => {
-  const html = await readFile('index.html', 'utf8');
-  const css = await readFile('styles.css', 'utf8');
-  const app = await readFile('js/app.mjs', 'utf8');
-
-  assert.match(html, /id="velocity-circle-panel"/, 'velocity-circle panel should exist');
-  assert.match(html, /aria-label="速度矢量圆"/, 'velocity-circle panel should be labeled');
-  assert.match(html, /id="velocity-circle-canvas"/, 'velocity-circle canvas should exist');
-  assert.match(html, /id="velocity-circle-tooltip"/, 'velocity-circle tooltip should exist');
-  assert.match(html, /id="velocity-circle-filter-list"/, 'velocity-circle filter list should exist');
-  assert.match(html, /id="velocity-circle-readout"/, 'velocity-circle readout should exist');
-  assert.match(html, /id="velocity-circle-minimize"/, 'velocity-circle panel should support minimize');
-  assert.match(html, /id="velocity-circle-mode-toggle"/, 'velocity-circle panel should support window/fullscreen toggle');
-  assert.match(html, /id="velocity-circle-close"/, 'velocity-circle panel should support close');
-  assert.match(html, /id="export-velocity-circle-png"/, 'assets should export velocity-circle PNG');
-  assert.match(css, /\.velocity-circle-panel/, 'CSS should style velocity-circle panel');
-  assert.match(css, /\.velocity-circle-panel\.is-fullscreen/, 'CSS should style velocity-circle fullscreen mode');
-  assert.match(css, /\.velocity-circle-filter-row/, 'CSS should style velocity-circle filters');
-  assert.match(app, /sampleVelocityCircles/, 'app should import velocity-circle sampling');
-  assert.match(app, /VelocityCircleView/, 'app should import velocity-circle renderer');
-  assert.match(app, /velocityCirclePanel:\s*'closed'/, 'app should track velocity-circle panel state');
-  assert.match(app, /velocityCircleFilters:\s*\{\}/, 'app should track velocity-circle filters');
-  assert.match(app, /setVelocityCirclePanel/, 'app should set velocity-circle panel modes');
-  assert.match(app, /syncVelocityCircleFilters/, 'app should sync velocity-circle filters from visible orbits');
-  assert.match(app, /renderVelocityCircle/, 'app should render velocity-circle data');
-  assert.match(app, /exportVelocityCirclePng/, 'app should export velocity-circle PNG');
-  assert.match(app, /function exportVelocityCirclePng[\s\S]*velocityCircleView\.capturePng\(\{ width: 1920, height: 1080 \}\)/, 'velocity-circle PNG export should use fixed 1920x1080 size');
-  assert.match(app, /function isVelocityCirclePanelOpen\(\)[\s\S]*state\.activeModule === 'velocityCircle'[\s\S]*!\['closed', 'minimized'\]\.includes\(state\.velocityCirclePanel\)/, 'velocity-circle work should require an actively open panel');
-  assert.match(app, /if \(isVelocityCirclePanelOpen\(\)\) renderVelocityCircle\(\)/, 'tick should skip inactive or minimized velocity-circle work');
-  assert.doesNotMatch(app, /if \(state\.velocityCirclePanel !== 'closed'\) renderVelocityCircle\(\)/, 'tick should not render minimized velocity-circle panels');
-  const throttledVelocityCircleBranch = app.match(
-    /function renderVelocityCircle\(options = \{\}\) \{[\s\S]*?if \(!options\.force && nowMs - state\.lastVelocityCircleRenderMs < minIntervalMs\) \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  state\.lastVelocityCircleRenderMs = nowMs/,
-  )?.[1] ?? '';
-  assert.notEqual(throttledVelocityCircleBranch, '', 'velocity-circle render throttle branch should be discoverable');
-  assert.doesNotMatch(throttledVelocityCircleBranch, /velocityCircleView\.setData|rebuildVelocityCircleTracks/, 'throttled velocity-circle ticks should not rebuild track geometry');
-  assert.match(app, /moduleName === 'velocityCircle' && !preview && \['closed', 'minimized'\]\.includes\(state\.velocityCirclePanel\)/, 'hover preview should not promote velocity-circle panel mode');
-  assert.match(app, /state\.velocityCircleFilters\[id\] = true/, 'new velocity-circle filters should default on');
 });
 
 test('stylesheet has balanced block delimiters', async () => {

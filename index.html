@@ -197,45 +197,6 @@
           </div>
         </aside>
 
-        <aside id="velocity-circle-panel" class="velocity-circle-panel" aria-label="速度矢量圆">
-          <div class="velocity-circle-header">
-            <div>
-              <p class="eyebrow">Velocity Circle</p>
-              <h2>速度矢量圆</h2>
-            </div>
-            <div class="velocity-circle-toolbar" aria-label="速度矢量圆工具">
-              <button class="pin-button" type="button" aria-label="固定速度圆" data-module-pin="velocityCircle" aria-pressed="false">
-                <svg class="button-icon pin-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M14 3l7 7-3 1-4 7-2-2-5 5-2-2 5-5-2-2 7-4 1-3z"></path>
-                </svg>
-              </button>
-              <button id="velocity-circle-minimize" class="icon-control-button" type="button" aria-label="最小化速度圆模块" title="最小化">
-                <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
-              </button>
-              <button id="velocity-circle-mode-toggle" class="icon-control-button" type="button" aria-label="切换窗口或全屏" title="窗口 / 全屏">
-                <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
-              </button>
-              <button id="velocity-circle-close" class="icon-control-button" type="button" aria-label="关闭速度圆模块" title="关闭">×</button>
-            </div>
-          </div>
-          <div class="velocity-circle-body">
-            <section class="velocity-circle-scene-shell" aria-label="速度空间三维视图">
-              <canvas id="velocity-circle-canvas"></canvas>
-              <div id="velocity-circle-tooltip" class="velocity-circle-tooltip" hidden></div>
-            </section>
-            <aside class="velocity-circle-sidebar" aria-label="速度圆设置">
-              <section class="velocity-circle-section-panel">
-                <h3>速度圆轨道选择</h3>
-                <div id="velocity-circle-filter-list" class="velocity-circle-filter-list"></div>
-              </section>
-              <section class="velocity-circle-section-panel">
-                <h3>速度矢量读数</h3>
-                <div id="velocity-circle-readout" class="velocity-circle-readout">悬停速度矢量后显示读数。</div>
-              </section>
-            </aside>
-          </div>
-        </aside>
-
         <aside id="console-panel" class="bottom-module-panel console-panel" aria-label="控制台模块">
           <div class="module-panel-header">
             <div>
@@ -270,10 +231,6 @@
           <button class="module-nav-button" type="button" data-module-nav="groundTrack" aria-label="星下点">
             <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0z"></path><path d="M4 12h16"></path><path d="M12 4c2.2 2.4 3.3 5.1 3.3 8S14.2 17.6 12 20"></path><path d="M12 4c-2.2 2.4-3.3 5.1-3.3 8S9.8 17.6 12 20"></path></svg>
             <span>星下点</span>
-          </button>
-          <button class="module-nav-button" type="button" data-module-nav="velocityCircle" aria-label="速度圆">
-            <span class="module-nav-icon">◌</span>
-            <span>速度圆</span>
           </button>
           <button class="module-nav-button" type="button" data-module-nav="assets" aria-label="资产">
             <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h6l2 2h8v10H4z"></path><path d="M4 7v12"></path></svg>
@@ -473,7 +430,6 @@
             </label>
             <button id="screenshot-button" type="button">导出截图</button>
             <button id="export-ground-track-png" type="button">导出星下点轨迹</button>
-            <button id="export-velocity-circle-png" type="button">导出速度圆</button>
           </div>
         </section>
       </aside>

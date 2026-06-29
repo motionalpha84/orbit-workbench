@@ -24,6 +24,7 @@ import {
   updateGroundTrackHistory,
 } from './groundtrack-history.mjs';
 import { GroundTrackView, formatUtc } from './groundtrack-view.mjs';
+import { calibrateOrbitVectors } from './vector-calibration.mjs';
 
 const STORAGE_KEY = 'eci-orbit-workbench:v1';
 const ASSET_LIBRARY_KEY = 'eci-orbit-workbench:asset-groups:v1';
@@ -67,6 +68,14 @@ const els = {
   timeReadoutPanel: document.querySelector('.simulation-time-panel'),
   timeReadout: document.querySelector('#time-readout'),
   screenshotButton: document.querySelector('#screenshot-button'),
+  calibrationModeButtons: Array.from(document.querySelectorAll('[data-calibration-mode]')),
+  calibrationUnit: document.querySelector('#calibration-unit'),
+  calibrationX: document.querySelector('#calibration-x'),
+  calibrationY: document.querySelector('#calibration-y'),
+  calibrationZ: document.querySelector('#calibration-z'),
+  calibrationSubmit: document.querySelector('#calibration-submit'),
+  calibrationClear: document.querySelector('#calibration-clear'),
+  calibrationResults: document.querySelector('#calibration-results'),
   simulationStartUtc: document.querySelector('#simulation-start-utc'),
   groundTrackPanel: document.querySelector('#ground-track-panel'),
   groundTrackModeToggle: document.querySelector('#ground-track-mode-toggle'),
@@ -178,6 +187,9 @@ const state = {
   groundTrackHistories: new Map(),
   groundTrackTracks: [],
   lastGroundTrackRenderMs: 0,
+  calibrationMode: 'position',
+  calibrationVector: { x: '', y: '', z: '' },
+  calibrationResult: null,
   frame: 'ECI',
   centerBody: 'earth',
   perturbationModel: 'two-body',
@@ -316,6 +328,7 @@ function applyWorkbenchSnapshot(snapshot = {}) {
     state.groundTrackOptions = { ...state.groundTrackOptions, ...snapshot.groundTrackOptions };
   }
   clearGroundTrackHistories();
+  clearVectorCalibration();
   resetForm();
 }
 
@@ -631,6 +644,7 @@ function clearGroundTrackHistories(id = null) {
 function removeOrbit(id) {
   state.orbits = state.orbits.filter((orbit) => orbit.id !== id);
   clearGroundTrackHistories(id);
+  clearVectorCalibration();
   setSelectedOrbitIds(state.selectedIds.filter((selectedId) => selectedId !== id));
   if (state.editingId === id) resetForm();
   markSceneDirty();
@@ -643,6 +657,7 @@ function toggleOrbitVisibility(id) {
   if (!record) return;
   record.visible = !record.visible;
   if (!record.visible) clearGroundTrackHistories(id);
+  clearVectorCalibration();
   markSceneDirty();
   syncGroundTrackHistories();
   renderUi();
@@ -870,6 +885,115 @@ function renderMetrics() {
     ${metricRow('ECI 位置', formatVectorTuple(current.positionKm, 2), 'km')}
     ${metricRow('ECI 速度', formatVectorTuple(current.velocityKmS, 4), 'km/s')}
   `;
+}
+
+function calibrationUnitLabel() {
+  return state.calibrationMode === 'velocity' ? 'ECI · km/s' : 'ECI · km';
+}
+
+function calibrationModeLabel(mode = state.calibrationMode) {
+  return mode === 'velocity' ? '速度标定' : '位置标定';
+}
+
+function calibrationResidualUnit(mode = state.calibrationMode) {
+  return mode === 'velocity' ? 'km/s' : 'km';
+}
+
+function readCalibrationVectorFromInputs() {
+  return {
+    x: els.calibrationX.value,
+    y: els.calibrationY.value,
+    z: els.calibrationZ.value,
+  };
+}
+
+function formatCalibrationVector(vector, digits = 4) {
+  if (!vector) return '--';
+  return `(${formatNumber(vector.x, digits)}, ${formatNumber(vector.y, digits)}, ${formatNumber(vector.z, digits)})`;
+}
+
+function calibrationResultItemHtml(item, mode, nearest = false) {
+  return `
+    <article class="calibration-result-item${nearest ? ' is-nearest' : ''}">
+      <strong>${escapeHtml(nearest ? `最近点：${item.orbitName}` : item.orbitName)}</strong>
+      <dl>
+        <dt>仿真时刻</dt><dd>${formatNumber(item.elapsedSeconds, 3)} s</dd>
+        <dt>ECI 位置</dt><dd>${escapeHtml(formatCalibrationVector(item.positionKm, 3))} km</dd>
+        <dt>ECI 速度</dt><dd>${escapeHtml(formatCalibrationVector(item.velocityKmS, 5))} km/s</dd>
+        <dt>残差</dt><dd>${formatNumber(item.residual, mode === 'velocity' ? 8 : 5)} ${calibrationResidualUnit(mode)}</dd>
+        <dt>动力学</dt><dd>${escapeHtml(item.perturbationModel)}</dd>
+      </dl>
+    </article>
+  `;
+}
+
+function renderCalibrationResults() {
+  els.calibrationUnit.textContent = calibrationUnitLabel();
+  for (const button of els.calibrationModeButtons) {
+    button.classList.toggle('is-active', button.dataset.calibrationMode === state.calibrationMode);
+  }
+
+  const result = state.calibrationResult;
+  if (!result) {
+    els.calibrationResults.textContent = '输入 ECI 矢量后点击标定。';
+    return;
+  }
+  if (result.status === 'input-error') {
+    els.calibrationResults.innerHTML = `<div class="empty-list">${escapeHtml(result.error)}</div>`;
+    return;
+  }
+  if (result.status === 'no-visible-orbits') {
+    els.calibrationResults.innerHTML = '<div class="empty-list">暂无可标定轨道。</div>';
+    return;
+  }
+  if (result.status === 'no-valid-states') {
+    els.calibrationResults.innerHTML = '<div class="empty-list">无有效轨道状态。</div>';
+    return;
+  }
+
+  if (result.hits.length === 0) {
+    els.calibrationResults.innerHTML = `
+      <div class="calibration-result-summary">无精确解</div>
+      ${result.nearest ? calibrationResultItemHtml(result.nearest, result.mode, true) : ''}
+    `;
+    return;
+  }
+
+  els.calibrationResults.innerHTML = `
+    <div class="calibration-result-summary">${escapeHtml(calibrationModeLabel(result.mode))}命中 ${result.hits.length} 个点</div>
+    ${result.hits.map((hit) => calibrationResultItemHtml(hit, result.mode)).join('')}
+  `;
+}
+
+function calibrationMarkersFromResult(result) {
+  if (!result?.hits?.length) return [];
+  return result.hits.map((hit) => ({
+    orbitId: hit.orbitId,
+    orbitName: hit.orbitName,
+    color: hit.color,
+    positionKm: hit.positionKm,
+    residual: hit.residual,
+    elapsedSeconds: hit.elapsedSeconds,
+  }));
+}
+
+function runVectorCalibration() {
+  state.calibrationVector = readCalibrationVectorFromInputs();
+  const budget = currentGroundTrackBudget();
+  state.calibrationResult = calibrateOrbitVectors(state.orbits, {
+    mode: state.calibrationMode,
+    targetVector: state.calibrationVector,
+    perturbationModel: state.perturbationModel,
+    sampleCount: budget.max3dReferenceSamples,
+  });
+  scene.setCalibrationMarkers(calibrationMarkersFromResult(state.calibrationResult));
+  renderCalibrationResults();
+}
+
+function clearVectorCalibration() {
+  state.calibrationResult = null;
+  scene.setCalibrationMarkers([]);
+  renderCalibrationResults();
 }
 
 function renderOrbitList() {
@@ -1353,6 +1477,7 @@ function clearCurrentSceneWithConfirmation() {
   state.currentAssetId = null;
   state.isSceneDirty = false;
   clearGroundTrackHistories();
+  clearVectorCalibration();
   resetForm();
   renderUi();
   saveState();
@@ -1492,6 +1617,7 @@ function renderUi() {
   renderOrbitList();
   renderStatusOrbitMenu();
   renderMetrics();
+  renderCalibrationResults();
   syncOverlayControlsFromState();
   scene.setFrame(state.frame);
   scene.setOverlayVisibility(state.overlays);
@@ -1549,6 +1675,7 @@ async function importJson(file) {
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
+    clearVectorCalibration();
     renderUi();
     saveState();
   } catch (error) {
@@ -1574,6 +1701,7 @@ async function importTxt(file) {
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
+    clearVectorCalibration();
     resetForm();
     renderUi();
     saveState();
@@ -1621,6 +1749,15 @@ function bindEvents() {
     button.addEventListener('click', () => toggleModulePin(button.dataset.modulePin));
   }
 
+  for (const button of els.calibrationModeButtons) {
+    button.addEventListener('click', () => {
+      state.calibrationMode = button.dataset.calibrationMode === 'velocity' ? 'velocity' : 'position';
+      clearVectorCalibration();
+    });
+  }
+  els.calibrationSubmit.addEventListener('click', runVectorCalibration);
+  els.calibrationClear.addEventListener('click', clearVectorCalibration);
+
   for (const card of document.querySelectorAll('.status-card')) {
     card.addEventListener('click', (event) => {
       if (event.button !== 0) return;
@@ -1648,6 +1785,7 @@ function bindEvents() {
       if (state.perturbationModel !== button.dataset.perturbationModel) {
         state.perturbationModel = button.dataset.perturbationModel;
         clearGroundTrackHistories();
+        clearVectorCalibration();
         markSceneDirty();
       }
       renderUi();
@@ -1684,6 +1822,7 @@ function bindEvents() {
       } else {
         state.orbits.push(record);
       }
+      clearVectorCalibration();
       setSelectedOrbitIds([...state.selectedIds.filter((id) => id !== record.id), record.id], { currentId: record.id });
       markSceneDirty();
       clearErrors();
@@ -1710,6 +1849,7 @@ function bindEvents() {
   els.resetTime.addEventListener('click', () => {
     state.elapsedSeconds = 0;
     clearGroundTrackHistories();
+    clearVectorCalibration();
     if (state.isPlaying) {
       const nowMs = performance.now();
       state.lastFrameMs = nowMs;

@@ -146,6 +146,7 @@ test('workbench, assets, settings, and ground-track controls match the new contr
   assert.match(app, /formatSimulationTimeReadout/, 'simulation time readout should format the active time unit');
   assert.match(app, /cycleSimulationTimeUnit/, 'simulation time readout should cycle units on double-click');
   assert.match(app, /timeReadoutPanel[\s\S]*addEventListener\('dblclick',\s*cycleSimulationTimeUnit\)/, 'simulation time readout panel should bind double-click unit cycling');
+  assert.match(app, /formatVectorTuple\(current\.velocityKmS,\s*6\)/, 'ECI velocity output should expose enough precision for vector calibration copy/paste');
   assert.match(app, /selectedIds:\s*\[\]/, 'app should track multiple selected orbit ids');
   assert.match(app, /function isOrbitSelected/, 'app should expose a shared selected-orbit predicate');
   assert.match(app, /function toggleOrbitSelection/, 'orbit clicks should toggle selection instead of replacing it');

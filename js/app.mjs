@@ -883,7 +883,7 @@ function renderMetrics() {
     ${metricRow('远地点高度', `${formatNumber(orbit.apoapsisAltitudeKm, 3)}`, 'km')}
     ${metricRow('速度范围', `${formatNumber(orbit.speedRangeKmS.min, 4)} - ${formatNumber(orbit.speedRangeKmS.max, 4)}`, 'km/s')}
     ${metricRow('ECI 位置', formatVectorTuple(current.positionKm, 2), 'km')}
-    ${metricRow('ECI 速度', formatVectorTuple(current.velocityKmS, 4), 'km/s')}
+    ${metricRow('ECI 速度', formatVectorTuple(current.velocityKmS, 6), 'km/s')}
   `;
 }
 

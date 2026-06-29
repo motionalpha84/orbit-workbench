@@ -130,9 +130,9 @@ test('workbench, assets, settings, and ground-track controls match the new contr
   assert.doesNotMatch(html, /导出 CSV/, 'CSV export should be removed from the ground-track panel');
   assert.match(html, /id="pause-button"[\s\S]*<path d="M9 6v12"><\/path>[\s\S]*<path d="M15 6v12"><\/path>/, 'pause icon bars should be separate strokes');
   assert.doesNotMatch(html, /M8 5h3v14H8z/, 'pause icon should not use touching filled bars');
-  assert.match(html, /id="reset-time"[\s\S]*class="button-icon reset-icon"[\s\S]*class="reset-icon-arc" d="M18\.7 7\.3A8 8 0 1 1 6\.2 5\.8"[\s\S]*class="reset-icon-head" d="M5\.8 4\.4 3\.2 12\.2l7\.8-1\.9z"/, 'reset icon should use a bold circular arrow matching the reference');
+  assert.match(html, /id="reset-time"[\s\S]*class="button-icon reset-icon"[\s\S]*class="reset-icon-arc" d="M6\.1 17\.3A8\.2 8\.2 0 1 0 7\.2 5\.6"[\s\S]*class="reset-icon-head" d="M4\.4 2\.8 2\.3 13\.7 12\.5 10\.8z"/, 'reset icon should use a large counterclockwise arrow matching the reference image');
   assert.match(css, /#pause-button \.button-icon path[\s\S]*?stroke-linecap:\s*round/, 'pause icon should use stroked separated bars');
-  assert.match(css, /#reset-time \.reset-icon-arc\s*\{[\s\S]*?stroke-width:\s*3\.4/, 'reset icon arc should use a thick stroke like the reference image');
+  assert.match(css, /#reset-time \.reset-icon-arc\s*\{[\s\S]*?stroke-width:\s*4\.2/, 'reset icon arc should be thinner while keeping the reference arrow shape');
   assert.match(css, /#reset-time \.reset-icon-head\s*\{[\s\S]*?fill:\s*currentColor/, 'reset icon should use a filled arrow head like the reference image');
   assert.match(css, /\.ground-track-panel\.is-fullscreen\s*\{[\s\S]*?bottom:\s*var\(--bottom-action-top-gap\)/, 'fullscreen ground-track panel should align its bottom with the run row top');
 
@@ -196,49 +196,10 @@ test('local server entrypoint and Windows launch script are present', async () =
   const script = await readFile('start-workbench.bat', 'utf8');
   const readme = await readFile('README.md', 'utf8');
 
-  assert.match(readme, /npm run dev/, 'README should document dual-process local launch');
-  assert.match(readme, /26563/, 'README should document the backend API port');
+  assert.match(readme, /node(?:\.exe)? server\.mjs/, 'README should document local server launch');
   assert.match(readme, /ECI/, 'README should document ECI frame');
   assert.match(script, /%~dp0/, 'script should run from its own directory');
   assert.match(script, /PORT=4173/, 'script should provide the default local port');
-  assert.match(script, /API_PORT=26563/, 'script should provide the default backend API port');
-  assert.match(script, /npm run dev/, 'script should start the frontend and backend together');
+  assert.match(script, /server\.mjs/, 'script should start the static server');
   assert.match(readme, /start-workbench\.bat/, 'README should document the launch script');
-});
-
-test('scene consumes backend render data instead of propagating orbits', async () => {
-  const scene = await readFile('js/scene.mjs', 'utf8');
-
-  assert.match(scene, /applyRenderData/, 'scene should expose a render-data ingestion method');
-  assert.match(scene, /applyOrbitRenderData/, 'scene should update individual orbit groups from backend data');
-  assert.match(scene, /referencePointsSignature/, 'scene should fingerprint static reference geometry payloads');
-  assert.match(scene, /group\.referenceSignature !== nextReferenceSignature/, 'scene should not rebuild reference geometry every playback frame');
-  assert.doesNotMatch(scene, /from '\.\/orbit\.mjs'/, 'scene should not import orbit propagation');
-  assert.doesNotMatch(scene, /propagateOrbit/, 'scene should not propagate orbit state');
-  assert.doesNotMatch(scene, /sampleOrbit/, 'scene should not sample orbit references');
-});
-
-test('app loads orbit and scene render data from the backend', async () => {
-  const app = await readFile('js/app.mjs', 'utf8');
-
-  assert.match(app, /from '\.\/api-client\.mjs'/, 'app should import the frontend API client');
-  assert.match(app, /createBackendClient/, 'app should create a backend client');
-  assert.match(app, /backend\.createOrbit/, 'app should create orbit records through the backend');
-  assert.match(app, /backend\.sceneRenderData/, 'app should request scene render data through the backend');
-  assert.match(app, /scene\.applyRenderData/, 'app should pass backend render data to the scene');
-  assert.doesNotMatch(app, /computeOrbit/, 'app should not compute orbit records directly');
-  assert.doesNotMatch(app, /propagateOrbit/, 'app should not propagate orbits directly');
-});
-
-test('app loads ground-track render data and stats from the backend', async () => {
-  const app = await readFile('js/app.mjs', 'utf8');
-
-  assert.match(app, /backend\.groundTrackRenderData/, 'app should request ground-track render data through the backend');
-  assert.match(app, /backend\.groundTrackRegionStats/, 'app should request region stats through the backend');
-  assert.match(app, /backend\.groundTrackCsv/, 'app should request CSV through the backend');
-  assert.match(app, /groundTrackHistoryKey/, 'app should scope backend ground-track history to this browser session');
-  assert.match(app, /historyKey: state\.groundTrackHistoryKey/, 'app should send the backend history key with render requests');
-  assert.doesNotMatch(app, /from '\.\/groundtrack-history\.mjs'/, 'app should not import ground-track history calculation');
-  assert.doesNotMatch(app, /groundTrackRegionStats,/, 'app should not import direct region stats calculation');
-  assert.doesNotMatch(app, /groundTrackBudget/, 'app should not calculate backend sampling budget');
 });

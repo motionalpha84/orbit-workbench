@@ -1,10 +1,9 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const root = resolve(import.meta.dirname);
-const defaultPort = Number(process.env.PORT || 4173);
+const port = Number(process.env.PORT || 4173);
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -27,38 +26,21 @@ function safePath(urlPath) {
   return absolute;
 }
 
-export function createFrontendServer() {
-  return createServer((request, response) => {
-    const filePath = safePath(request.url || '/');
-    if (!filePath || !existsSync(filePath) || !statSync(filePath).isFile()) {
-      response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      response.end('Not found');
-      return;
-    }
+const server = createServer((request, response) => {
+  const filePath = safePath(request.url || '/');
+  if (!filePath || !existsSync(filePath) || !statSync(filePath).isFile()) {
+    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    response.end('Not found');
+    return;
+  }
 
-    response.writeHead(200, {
-      'Content-Type': mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
-    });
-    createReadStream(filePath).pipe(response);
+  response.writeHead(200, {
+    'Content-Type': mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream',
+    'Cache-Control': 'no-cache',
   });
-}
+  createReadStream(filePath).pipe(response);
+});
 
-export function startFrontendServer({ port = defaultPort, host = '127.0.0.1', log = true } = {}) {
-  const server = createFrontendServer();
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => {
-      server.off('error', reject);
-      if (log) console.log(`ECI orbit workbench frontend running at http://${host}:${server.address().port}`);
-      resolve(server);
-    });
-  });
-}
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  startFrontendServer().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
-}
+server.listen(port, '127.0.0.1', () => {
+  console.log(`ECI orbit workbench running at http://127.0.0.1:${port}`);
+});

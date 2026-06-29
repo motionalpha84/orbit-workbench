@@ -1,6 +1,6 @@
 import * as THREE from '../vendor/three.module.js';
+import { EARTH_RADIUS_KM, normalizePerturbationModel, propagateOrbit, sampleOrbit } from './orbit.mjs';
 
-const EARTH_RADIUS_KM = 6378.137;
 const EARTH_SCENE_RADIUS = 1;
 const KM_TO_SCENE = EARTH_SCENE_RADIUS / EARTH_RADIUS_KM;
 const DEFAULT_TRAIL_POINTS = 130;
@@ -11,18 +11,8 @@ const ECLIPTIC_OBLIQUITY_DEG = 23.439;
 const DEFAULT_CAMERA_POSITION = new THREE.Vector3(0.2, 2.0, 4.9);
 const DEFAULT_CAMERA_UP = new THREE.Vector3(0, 1, 0);
 const TWO_PI = Math.PI * 2;
-const SUPPORTED_PERTURBATION_MODELS = new Set(['two-body', 'j2', 'j3']);
 
 export const EARTH_SIDEREAL_DAY_SECONDS = 86164.0905;
-
-function normalizePerturbationModel(model) {
-  return SUPPORTED_PERTURBATION_MODELS.has(model) ? model : 'two-body';
-}
-
-function finiteNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
 
 function colorFromHex(hex) {
   return new THREE.Color(hex);
@@ -284,13 +274,6 @@ export function frameAxesRotationAngleAt(frame, elapsedSeconds) {
   return frame === 'ECEF' ? earthRotationAngleAt(elapsedSeconds) : 0;
 }
 
-export function renderTimingAngles(frame, elapsedSeconds) {
-  return {
-    earthRotationAngleRad: earthRotationAngleAt(elapsedSeconds),
-    frameAxesRotationAngleRad: frameAxesRotationAngleAt(frame, elapsedSeconds),
-  };
-}
-
 export function orbitReferenceSampleCount(orbit, maxSamples = MAX_REFERENCE_SAMPLES) {
   const a = orbit.elements.semiMajorAxisKm * KM_TO_SCENE;
   const b = a * Math.sqrt(1 - orbit.elements.eccentricity ** 2);
@@ -304,97 +287,17 @@ export function orbitReferenceSampleCount(orbit, maxSamples = MAX_REFERENCE_SAMP
   );
 }
 
-function referencePointSignaturePart(sample = {}) {
-  const scenePoint = sample.scenePoint ?? {};
+function orbitReferenceSignature(orbitRecord, perturbationModel) {
+  const elements = orbitRecord.orbit.elements;
   return [
-    finiteNumber(sample.elapsedSeconds).toFixed(6),
-    finiteNumber(scenePoint.x).toFixed(6),
-    finiteNumber(scenePoint.y).toFixed(6),
-    finiteNumber(scenePoint.z).toFixed(6),
-  ].join(':');
-}
-
-export function referencePointsSignature(referencePoints = []) {
-  if (!Array.isArray(referencePoints) || referencePoints.length === 0) return '0';
-  const middle = referencePoints[Math.floor(referencePoints.length / 2)];
-  return [
-    referencePoints.length,
-    referencePointSignaturePart(referencePoints[0]),
-    referencePointSignaturePart(middle),
-    referencePointSignaturePart(referencePoints[referencePoints.length - 1]),
+    normalizePerturbationModel(perturbationModel),
+    elements.semiMajorAxisKm,
+    elements.eccentricity,
+    elements.inclinationDeg,
+    elements.raanDeg,
+    elements.argPeriapsisDeg,
+    elements.trueAnomalyDeg,
   ].join('|');
-}
-
-function wrapElapsedSeconds(elapsedSeconds, periodSeconds) {
-  const period = Math.max(1e-6, finiteNumber(periodSeconds, 1));
-  const wrapped = finiteNumber(elapsedSeconds) % period;
-  return wrapped < 0 ? wrapped + period : wrapped;
-}
-
-function interpolatePoint(a = {}, b = {}, fraction = 0) {
-  return {
-    x: finiteNumber(a.x) + (finiteNumber(b.x) - finiteNumber(a.x)) * fraction,
-    y: finiteNumber(a.y) + (finiteNumber(b.y) - finiteNumber(a.y)) * fraction,
-    z: finiteNumber(a.z) + (finiteNumber(b.z) - finiteNumber(a.z)) * fraction,
-  };
-}
-
-function interpolateSample(previous, next, fraction, elapsedSeconds) {
-  return {
-    ...next,
-    elapsedSeconds,
-    scenePoint: interpolatePoint(previous.scenePoint, next.scenePoint, fraction),
-    positionKm: previous.positionKm && next.positionKm
-      ? interpolatePoint(previous.positionKm, next.positionKm, fraction)
-      : next.positionKm,
-    velocityKmS: previous.velocityKmS && next.velocityKmS
-      ? interpolatePoint(previous.velocityKmS, next.velocityKmS, fraction)
-      : next.velocityKmS,
-  };
-}
-
-export function playbackSampleAt(samples = [], elapsedSeconds = 0, periodSeconds = 0) {
-  const ordered = samples
-    .filter((sample) => Number.isFinite(Number(sample.elapsedSeconds)))
-    .slice()
-    .sort((a, b) => a.elapsedSeconds - b.elapsedSeconds);
-  if (ordered.length === 0) return null;
-  if (ordered.length === 1) return ordered[0];
-
-  const period = Math.max(
-    finiteNumber(periodSeconds, 0),
-    finiteNumber(ordered[ordered.length - 1].elapsedSeconds, 0),
-    1e-6,
-  );
-  const wrapped = wrapElapsedSeconds(elapsedSeconds, period);
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1];
-    const next = ordered[index];
-    if (wrapped <= next.elapsedSeconds) {
-      const span = Math.max(1e-6, next.elapsedSeconds - previous.elapsedSeconds);
-      return interpolateSample(previous, next, (wrapped - previous.elapsedSeconds) / span, wrapped);
-    }
-  }
-
-  const previous = ordered[ordered.length - 1];
-  const first = ordered[0];
-  const next = { ...first, elapsedSeconds: first.elapsedSeconds + period };
-  const span = Math.max(1e-6, next.elapsedSeconds - previous.elapsedSeconds);
-  return interpolateSample(previous, next, (wrapped - previous.elapsedSeconds) / span, wrapped);
-}
-
-function tailSamplesFromPlaybackSamples(samples = [], elapsedSeconds = 0, periodSeconds = 1) {
-  const period = Math.max(1e-6, finiteNumber(periodSeconds, 1));
-  const tailSpan = Math.min(period * 0.22, Math.max(420, period * 0.1));
-  return Array.from({ length: DEFAULT_TRAIL_POINTS }, (_, index) => {
-    const fade = index / (DEFAULT_TRAIL_POINTS - 1);
-    const sample = playbackSampleAt(samples, elapsedSeconds - tailSpan * (1 - fade), period);
-    return {
-      ...sample,
-      alpha: 0.03 + fade ** 1.35 * 0.84,
-      phase: fade,
-    };
-  });
 }
 
 class ArcballControls {
@@ -818,6 +721,7 @@ export class OrbitScene {
       }
       const group = this.orbitGroups.get(orbitRecord.id);
       group.orbitRecord = orbitRecord;
+      this.updateOrbitReference(group, orbitRecord, model);
       group.root.visible = orbitRecord.visible;
       group.reference.visible = orbitRecord.visible && this.showReference;
     }
@@ -865,15 +769,22 @@ export class OrbitScene {
 
     this.root.add(root);
     const group = { root, reference, tail, marker, orbitRecord, referenceSignature: '' };
+    this.updateOrbitReference(group, orbitRecord, perturbationModel);
     return group;
   }
 
-  updateOrbitReference(group, referencePoints = []) {
-    const positions = new Float32Array(referencePoints.length * 3);
-    referencePoints.forEach((sample, index) => {
-      const point = sample.scenePoint
-        ? new THREE.Vector3(sample.scenePoint.x, sample.scenePoint.y, sample.scenePoint.z)
-        : vectorToScene(sample.positionKm);
+  updateOrbitReference(group, orbitRecord, perturbationModel = this.perturbationModel) {
+    const signature = orbitReferenceSignature(orbitRecord, perturbationModel);
+    if (group.referenceSignature === signature) return;
+
+    const samples = sampleOrbit(
+      orbitRecord.orbit,
+      orbitReferenceSampleCount(orbitRecord.orbit, this.maxReferenceSamples),
+      { perturbationModel },
+    );
+    const positions = new Float32Array(samples.length * 3);
+    samples.forEach((sample, index) => {
+      const point = vectorToScene(sample.positionKm);
       positions.set([point.x, point.y, point.z], index * 3);
     });
 
@@ -881,6 +792,7 @@ export class OrbitScene {
     referenceGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     group.reference.geometry.dispose();
     group.reference.geometry = referenceGeometry;
+    group.referenceSignature = signature;
   }
 
   update(orbits, elapsedSeconds, perturbationModel = this.perturbationModel) {
@@ -889,67 +801,39 @@ export class OrbitScene {
     this.earthBody.rotation.y = earthRotationAngleAt(elapsedSeconds);
     this.axesGroup.rotation.y = frameAxesRotationAngleAt(this.frame, elapsedSeconds);
     this.syncOrbits(orbits, this.perturbationModel);
-    this.controls.update();
-    this.render();
-  }
-
-  applyRenderData(renderData = {}) {
-    this.elapsedSeconds = Number(renderData.elapsedSeconds) || 0;
-    this.perturbationModel = normalizePerturbationModel(renderData.perturbationModel);
-    const timingAngles = renderTimingAngles(this.frame, this.elapsedSeconds);
-    this.earthBody.rotation.y = timingAngles.earthRotationAngleRad;
-    this.axesGroup.rotation.y = timingAngles.frameAxesRotationAngleRad;
-    const renderOrbits = Array.isArray(renderData.orbits) ? renderData.orbits : [];
-    const shellRecords = renderOrbits.map((orbit) => ({
-      id: orbit.id,
-      name: orbit.name,
-      color: orbit.color,
-      visible: orbit.visible !== false,
-      orbit: { elements: {}, periodSeconds: 1 },
-    }));
-    this.syncOrbits(shellRecords, this.perturbationModel);
-    for (const orbitRenderData of renderOrbits) {
-      const group = this.orbitGroups.get(orbitRenderData.id);
-      if (!group || orbitRenderData.visible === false) continue;
-      this.applyOrbitRenderData(group, orbitRenderData);
+    for (const orbitRecord of orbits) {
+      const group = this.orbitGroups.get(orbitRecord.id);
+      if (!group || !orbitRecord.visible) continue;
+      this.updateOrbitGroup(group, orbitRecord, elapsedSeconds);
     }
     this.controls.update();
     this.render();
   }
 
-  applyOrbitRenderData(group, orbitRenderData) {
-    const referencePoints = orbitRenderData.referencePoints ?? [];
-    const nextReferenceSignature = referencePointsSignature(referencePoints);
-    if (group.referenceSignature !== nextReferenceSignature) {
-      this.updateOrbitReference(group, referencePoints);
-      group.referenceSignature = nextReferenceSignature;
-    }
-    const playbackSamples = orbitRenderData.playbackSamples ?? [];
-    const periodSeconds = finiteNumber(orbitRenderData.periodSeconds, 0);
-    const tailSamples = playbackSamples.length > 0
-      ? tailSamplesFromPlaybackSamples(playbackSamples, this.elapsedSeconds, periodSeconds)
-      : orbitRenderData.tailSamples ?? [];
+  updateOrbitGroup(group, orbitRecord, elapsedSeconds) {
+    const period = orbitRecord.orbit.periodSeconds;
+    const tailSpan = Math.min(period * 0.22, Math.max(420, period * 0.1));
     const positions = group.tail.geometry.getAttribute('position');
     const alphas = group.tail.geometry.getAttribute('alpha');
     const phases = group.tail.geometry.getAttribute('phase');
-    group.tail.material.uniforms.time.value = this.elapsedSeconds;
+    group.tail.material.uniforms.time.value = elapsedSeconds;
 
     for (let i = 0; i < DEFAULT_TRAIL_POINTS; i += 1) {
-      const sample = tailSamples[Math.min(i, Math.max(0, tailSamples.length - 1))];
-      const scenePoint = sample?.scenePoint ?? { x: 0, y: 0, z: 0 };
-      positions.setXYZ(i, scenePoint.x, scenePoint.y, scenePoint.z);
-      alphas.setX(i, orbitRenderData.visible === false ? 0 : Number(sample?.alpha ?? 0));
-      phases.setX(i, Number(sample?.phase ?? 0));
+      const t = elapsedSeconds - tailSpan * (1 - i / (DEFAULT_TRAIL_POINTS - 1));
+      const state = propagateOrbit(orbitRecord.orbit, t, { perturbationModel: this.perturbationModel });
+      const point = vectorToScene(state.positionKm);
+      positions.setXYZ(i, point.x, point.y, point.z);
+      const fade = i / (DEFAULT_TRAIL_POINTS - 1);
+      alphas.setX(i, orbitRecord.visible ? 0.03 + fade ** 1.35 * 0.84 : 0);
+      phases.setX(i, fade);
     }
     positions.needsUpdate = true;
     alphas.needsUpdate = true;
     phases.needsUpdate = true;
 
-    const currentSample = playbackSamples.length > 0
-      ? playbackSampleAt(playbackSamples, this.elapsedSeconds, periodSeconds)
-      : orbitRenderData.current;
-    const currentPoint = currentSample?.scenePoint;
-    if (currentPoint) group.marker.position.set(currentPoint.x, currentPoint.y, currentPoint.z);
+    const state = propagateOrbit(orbitRecord.orbit, elapsedSeconds, { perturbationModel: this.perturbationModel });
+    const current = vectorToScene(state.positionKm);
+    group.marker.position.copy(current);
   }
 
   resize() {

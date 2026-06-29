@@ -1,9 +1,10 @@
 import {
+  computeOrbit,
   formatDuration,
   formatNumber,
+  propagateOrbit,
 } from './orbit.mjs';
-import { OrbitScene } from './scene.mjs';
-import { createBackendClient } from './api-client.mjs';
+import { OrbitScene, orbitReferenceSampleCount } from './scene.mjs';
 import {
   DEFAULT_ORBIT_COLORS,
   hexToRgb,
@@ -12,6 +13,16 @@ import {
   rgbToHex,
 } from './color.mjs';
 import { parseOrbitText } from './importers.mjs';
+import {
+  groundTrackBudget,
+  groundTrackRegionStats,
+  utcMsFromInput,
+} from './groundtrack.mjs';
+import {
+  groundTrackTrackFromHistory,
+  pruneGroundTrackHistory,
+  updateGroundTrackHistory,
+} from './groundtrack-history.mjs';
 import { GroundTrackView, formatUtc } from './groundtrack-view.mjs';
 
 const STORAGE_KEY = 'eci-orbit-workbench:v1';
@@ -117,7 +128,6 @@ const groundTrackView = new GroundTrackView({
   tooltip: els.groundTrackTooltip,
   selectionSummary: els.groundTrackSelectionSummary,
 });
-const backend = createBackendClient();
 
 const state = {
   orbits: [],
@@ -165,14 +175,8 @@ const state = {
   assetGroups: [],
   currentAssetId: null,
   isSceneDirty: false,
-  sceneRenderData: null,
-  sceneRenderPending: false,
-  sceneRenderError: '',
+  groundTrackHistories: new Map(),
   groundTrackTracks: [],
-  groundTrackRenderData: null,
-  groundTrackRenderPending: false,
-  groundTrackRenderError: '',
-  groundTrackHistoryKey: uuid(),
   lastGroundTrackRenderMs: 0,
   frame: 'ECI',
   centerBody: 'earth',
@@ -187,7 +191,7 @@ const state = {
 };
 
 function uuid() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  if (crypto?.randomUUID) return crypto.randomUUID();
   return `orbit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
@@ -199,17 +203,6 @@ function currentTimestampLabel() {
 function utcDatetimeLocalValue(date = new Date()) {
   const utc = new Date(date);
   return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, '0')}-${String(utc.getUTCDate()).padStart(2, '0')}T${String(utc.getUTCHours()).padStart(2, '0')}:${String(utc.getUTCMinutes()).padStart(2, '0')}`;
-}
-
-function utcMsFromInput(value, fallbackMs = Date.now()) {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string' || value.trim() === '') return fallbackMs;
-  const trimmed = value.trim();
-  const hasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(trimmed);
-  const utcText = hasTimezone ? trimmed : `${trimmed.length === 16 ? `${trimmed}:00` : trimmed}Z`;
-  const parsed = Date.parse(utcText);
-  return Number.isFinite(parsed) ? parsed : fallbackMs;
 }
 
 function finitePositiveNumber(value, fallback = 0) {
@@ -285,20 +278,16 @@ function serializeWorkbenchSnapshot() {
   };
 }
 
-async function buildOrbitRecordsFromSerialized(orbits = []) {
-  const records = [];
-  for (const [index, item] of orbits.entries()) {
-    records.push(await buildOrbitRecord(item.elements ?? item, {
-      id: item.id ?? uuid(),
-      color: item.color ?? nextOrbitColor(index),
-      visible: item.visible !== false,
-    }));
-  }
-  return records;
+function buildOrbitRecordsFromSerialized(orbits = []) {
+  return orbits.map((item, index) => buildOrbitRecord(item.elements ?? item, {
+    id: item.id ?? uuid(),
+    color: item.color ?? nextOrbitColor(index),
+    visible: item.visible !== false,
+  }));
 }
 
-async function applyWorkbenchSnapshot(snapshot = {}) {
-  state.orbits = await buildOrbitRecordsFromSerialized(snapshot.orbits ?? []);
+function applyWorkbenchSnapshot(snapshot = {}) {
+  state.orbits = buildOrbitRecordsFromSerialized(snapshot.orbits ?? []);
   setSelectedOrbitIds(
     Array.isArray(snapshot.selectedIds) ? snapshot.selectedIds : snapshot.selectedId ? [snapshot.selectedId] : [],
     { currentId: snapshot.selectedId, defaultFirst: true },
@@ -333,42 +322,6 @@ async function applyWorkbenchSnapshot(snapshot = {}) {
 function markSceneDirty() {
   state.isSceneDirty = true;
   renderAssetLibrary();
-}
-
-function sceneRenderRequestPayload() {
-  return {
-    orbits: state.orbits,
-    elapsedSeconds: state.elapsedSeconds,
-    perturbationModel: state.perturbationModel,
-    frame: state.frame,
-    performance: {
-      mode: state.performanceMode,
-      memoryGb: state.customMemoryGb,
-    },
-  };
-}
-
-async function refreshSceneRenderData({ force = false } = {}) {
-  if (!force && state.sceneRenderPending) return state.sceneRenderData;
-  if (state.orbits.length === 0) {
-    state.sceneRenderData = null;
-    scene.applyRenderData({ elapsedSeconds: state.elapsedSeconds, orbits: [] });
-    return null;
-  }
-  state.sceneRenderPending = true;
-  state.sceneRenderError = '';
-  try {
-    state.sceneRenderData = await backend.sceneRenderData(sceneRenderRequestPayload());
-    scene.applyRenderData(state.sceneRenderData);
-  } catch (error) {
-    if (error.name !== 'AbortError') {
-      state.sceneRenderError = error.message || '后端计算失败，请重试。';
-      showErrors(state.sceneRenderError);
-    }
-  } finally {
-    state.sceneRenderPending = false;
-  }
-  return state.sceneRenderData;
 }
 
 function saveAssetLibrary() {
@@ -434,7 +387,7 @@ function saveState() {
   saveAssetLibrary();
 }
 
-async function restoreState() {
+function restoreState() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
   try {
@@ -493,7 +446,7 @@ async function restoreState() {
       state.perturbationModel = payload.perturbationModel;
     }
     if (Array.isArray(payload?.orbits)) {
-      state.orbits = await buildOrbitRecordsFromSerialized(payload.orbits);
+      state.orbits = buildOrbitRecordsFromSerialized(payload.orbits);
       setSelectedOrbitIds(
         Array.isArray(payload.selectedIds) ? payload.selectedIds : payload.selectedId ? [payload.selectedId] : [],
         { currentId: payload.selectedId, defaultFirst: true },
@@ -504,16 +457,16 @@ async function restoreState() {
   }
 }
 
-async function buildOrbitRecord(rawElements, options = {}) {
-  return backend.createOrbit({
+function buildOrbitRecord(rawElements, options = {}) {
+  const orbit = computeOrbit(rawElements);
+  const name = rawElements.name?.trim() || `Orbit ${state.orbits.length + 1}`;
+  return {
     id: options.id ?? uuid(),
+    name,
     color: normalizeHexColor(options.color, nextOrbitColor(state.orbits.length)),
     visible: options.visible ?? true,
-    elements: {
-      ...rawElements,
-      name: rawElements.name?.trim() || `Orbit ${state.orbits.length + 1}`,
-    },
-  });
+    orbit,
+  };
 }
 
 function formToElements() {
@@ -666,32 +619,32 @@ function pausePlayback() {
 }
 
 function clearGroundTrackHistories(id = null) {
+  if (id === null) {
+    state.groundTrackHistories.clear();
+  } else {
+    state.groundTrackHistories.delete(id);
+  }
   state.groundTrackTracks = [];
-  state.groundTrackRenderData = null;
-  if (id === null) state.groundTrackHistoryKey = uuid();
   renderGroundTrackStats();
-  groundTrackView.setSelectionStats(null);
 }
 
-async function removeOrbit(id) {
+function removeOrbit(id) {
   state.orbits = state.orbits.filter((orbit) => orbit.id !== id);
   clearGroundTrackHistories(id);
   setSelectedOrbitIds(state.selectedIds.filter((selectedId) => selectedId !== id));
   if (state.editingId === id) resetForm();
   markSceneDirty();
-  await refreshSceneRenderData({ force: true });
   renderUi();
   saveState();
 }
 
-async function toggleOrbitVisibility(id) {
+function toggleOrbitVisibility(id) {
   const record = state.orbits.find((orbit) => orbit.id === id);
   if (!record) return;
   record.visible = !record.visible;
   if (!record.visible) clearGroundTrackHistories(id);
   markSceneDirty();
-  await refreshSceneRenderData({ force: true });
-  if (state.groundTrackPanel !== 'closed') renderGroundTrack({ force: true });
+  syncGroundTrackHistories();
   renderUi();
   saveState();
 }
@@ -825,6 +778,7 @@ function openModule(moduleName, { preview = false } = {}) {
   }
   applyModuleState();
   if (moduleName === 'groundTrack') {
+    syncGroundTrackHistories();
     renderGroundTrack({ force: true });
   }
   saveState();
@@ -904,8 +858,7 @@ function renderMetrics() {
   }
 
   const orbit = selected.orbit;
-  const renderOrbit = state.sceneRenderData?.orbits?.find((item) => item.id === selected.id);
-  const current = renderOrbit?.current ?? selected.metrics;
+  const current = propagateOrbit(orbit, state.elapsedSeconds, { perturbationModel: state.perturbationModel });
   els.selectedOrbitName.textContent = state.selectedIds.length > 1
     ? `${selected.name} 等 ${state.selectedIds.length} 条`
     : selected.name;
@@ -959,9 +912,7 @@ function renderOrbitList() {
     visibility.type = 'button';
     visibility.title = record.visible ? '隐藏轨道' : '显示轨道';
     visibility.textContent = record.visible ? '●' : '○';
-    visibility.addEventListener('click', () => {
-      toggleOrbitVisibility(record.id).catch((error) => showErrors(error.message || error));
-    });
+    visibility.addEventListener('click', () => toggleOrbitVisibility(record.id));
 
     const edit = document.createElement('button');
     edit.className = 'mini-button';
@@ -978,9 +929,7 @@ function renderOrbitList() {
     remove.type = 'button';
     remove.title = '删除轨道';
     remove.textContent = '×';
-    remove.addEventListener('click', () => {
-      removeOrbit(record.id).catch((error) => showErrors(error.message || error));
-    });
+    remove.addEventListener('click', () => removeOrbit(record.id));
 
     actions.append(visibility, edit, remove);
     item.append(dot, main, actions);
@@ -1059,6 +1008,15 @@ function showOrbitTooltip(payload) {
   els.orbitTooltip.style.top = `${Math.max(margin, top)}px`;
 }
 
+function currentGroundTrackBudget() {
+  const budget = groundTrackBudget({
+    mode: state.performanceMode,
+    memoryGb: state.customMemoryGb,
+  });
+  scene.setPerformanceBudget?.(budget);
+  return budget;
+}
+
 function syncGroundTrackControlsFromState() {
   if (!state.simulationStartUtc) state.simulationStartUtc = utcDatetimeLocalValue(new Date());
   state.groundTrackWindow.timeUnit = normalizeTimeUnit(state.groundTrackWindow.timeUnit);
@@ -1093,6 +1051,7 @@ function syncPerformanceFromControls() {
     ? els.performanceMode.value
     : 'high';
   state.customMemoryGb = Math.max(1, Math.min(24, Number(els.customMemory.value) || 8));
+  currentGroundTrackBudget();
 }
 
 function syncSettingsControls() {
@@ -1161,6 +1120,7 @@ function renderGroundTrackFilters() {
       state.groundTrackFilters[record.id] = input.checked;
       if (!input.checked) clearGroundTrackHistories(record.id);
       markSceneDirty();
+      syncGroundTrackHistories();
       renderGroundTrack({ force: true });
       saveState();
     });
@@ -1182,51 +1142,67 @@ function currentGroundTrackWindow() {
     };
 }
 
-function activeGroundTrackRecords() {
+function groundTrackReferenceSampleCount(orbitRecord, budget) {
+  return orbitReferenceSampleCount(orbitRecord.orbit, budget.max3dReferenceSamples);
+}
+
+function activeGroundTrackRecords(budget) {
   syncGroundTrackFilters();
   return state.orbits
-    .filter((orbit) => orbit.visible && state.groundTrackFilters[orbit.id] !== false);
+    .filter((orbit) => orbit.visible && state.groundTrackFilters[orbit.id] !== false)
+    .slice(0, budget.mapCacheTracks);
 }
 
-function groundTrackRenderRequestPayload() {
-  return {
-    orbits: activeGroundTrackRecords(),
-    elapsedSeconds: state.elapsedSeconds,
-    startUtcMs: utcMsFromInput(state.simulationStartUtc),
-    perturbationModel: state.perturbationModel,
-    window: currentGroundTrackWindow(),
-    historyKey: state.groundTrackHistoryKey,
-    performance: {
-      mode: state.performanceMode,
-      memoryGb: state.customMemoryGb,
-    },
-    selectedIds: Object.entries(state.groundTrackFilters)
-      .filter(([, enabled]) => enabled !== false)
-      .map(([id]) => id),
-  };
+function rebuildGroundTrackTracksFromCache(records = null) {
+  const budget = currentGroundTrackBudget();
+  const activeRecords = records ?? activeGroundTrackRecords(budget);
+  const window = currentGroundTrackWindow();
+  state.groundTrackTracks = activeRecords
+    .map((orbitRecord) => {
+      const history = state.groundTrackHistories.get(orbitRecord.id);
+      return history ? groundTrackTrackFromHistory(history, orbitRecord, window) : null;
+    })
+    .filter(Boolean);
+  return state.groundTrackTracks;
 }
 
-async function refreshGroundTrackRenderData({ force = false } = {}) {
+function syncGroundTrackHistories() {
   if (state.groundTrackPanel === 'closed') {
     state.groundTrackTracks = [];
-    state.groundTrackRenderData = null;
-    return null;
+    return;
   }
-  if (!force && state.groundTrackRenderPending) return state.groundTrackRenderData;
-  state.groundTrackRenderPending = true;
-  state.groundTrackRenderError = '';
-  try {
-    state.groundTrackRenderData = await backend.groundTrackRenderData(groundTrackRenderRequestPayload());
-    state.groundTrackTracks = state.groundTrackRenderData.tracks ?? [];
-  } catch (error) {
-    if (error.name !== 'AbortError') {
-      state.groundTrackRenderError = error.message || '后端计算失败，请重试。';
-      showErrors(state.groundTrackRenderError);
-    }
-  } finally {
-    state.groundTrackRenderPending = false;
+  const budget = currentGroundTrackBudget();
+  const activeRecords = activeGroundTrackRecords(budget);
+  const activeIds = new Set(activeRecords.map((orbit) => orbit.id));
+  const startUtcMs = utcMsFromInput(state.simulationStartUtc, Date.now());
+  const window = currentGroundTrackWindow();
+
+  for (const id of state.groundTrackHistories.keys()) {
+    if (!activeIds.has(id)) state.groundTrackHistories.delete(id);
   }
-  return state.groundTrackRenderData;
+
+  for (const orbitRecord of activeRecords) {
+    const history = updateGroundTrackHistory(state.groundTrackHistories.get(orbitRecord.id), {
+      orbitRecord,
+      elapsedSeconds: state.elapsedSeconds,
+      startUtcMs,
+      perturbationModel: state.perturbationModel,
+      referenceSampleCount: groundTrackReferenceSampleCount(orbitRecord, budget),
+      window,
+      maxCatchUpPoints: Math.max(60, Math.floor(budget.maxGroundTrackSamples / Math.max(1, activeRecords.length))),
+    });
+    state.groundTrackHistories.set(orbitRecord.id, history);
+  }
+
+  rebuildGroundTrackTracksFromCache(activeRecords);
+}
+
+function pruneGroundTrackHistoriesToWindow() {
+  const window = currentGroundTrackWindow();
+  for (const history of state.groundTrackHistories.values()) {
+    pruneGroundTrackHistory(history, window, state.elapsedSeconds);
+  }
+  rebuildGroundTrackTracksFromCache();
 }
 
 function renderGroundTrackStats(stats = null) {
@@ -1281,9 +1257,7 @@ function renderAssetLibrary() {
     main.className = 'orbit-main';
     main.type = 'button';
     main.innerHTML = `<strong>${escapeHtml(group.name)}</strong><span>${group.snapshot?.orbits?.length ?? 0} 条轨道 · ${escapeHtml(formatUtc(group.updatedAt))}</span>`;
-    main.addEventListener('click', () => {
-      loadAssetGroup(group.id).catch((error) => showErrors(error.message || error));
-    });
+    main.addEventListener('click', () => loadAssetGroup(group.id));
 
     const exportButton = document.createElement('button');
     exportButton.className = 'mini-button';
@@ -1335,14 +1309,13 @@ function saveCurrentAssetGroup() {
   renderAssetLibrary();
 }
 
-async function loadAssetGroup(id) {
+function loadAssetGroup(id) {
   const group = state.assetGroups.find((item) => item.id === id);
   if (!group) return;
   if (state.isSceneDirty && !window.confirm('当前轨道组有未保存修改，切换会丢弃这些修改。是否继续？')) return;
-  await applyWorkbenchSnapshot(group.snapshot);
+  applyWorkbenchSnapshot(group.snapshot);
   state.currentAssetId = group.id;
   state.isSceneDirty = false;
-  await refreshSceneRenderData({ force: true });
   renderUi();
   saveState();
 }
@@ -1420,6 +1393,7 @@ function setGroundTrackPanel(mode, { confirmClose = true } = {}) {
   applyModuleState();
   const shouldDraw = !['closed', 'minimized'].includes(state.groundTrackPanel);
   if (shouldDraw) {
+    syncGroundTrackHistories();
     requestAnimationFrame(() => renderGroundTrack({ force: true }));
   }
   saveState();
@@ -1433,18 +1407,17 @@ function renderGroundTrack(options = {}) {
 
   const nowMs = performance.now();
   const minIntervalMs = state.isPlaying ? 240 : 800;
-  if (options.force || nowMs - state.lastGroundTrackRenderMs >= minIntervalMs) {
-    state.lastGroundTrackRenderMs = nowMs;
-    refreshGroundTrackRenderData({ force: Boolean(options.force) }).then(() => {
-      groundTrackView.setData(state.groundTrackTracks, {
-        selectedIds: state.selectedIds,
-        elapsedSeconds: state.elapsedSeconds,
-        isPlaying: state.isPlaying,
-      });
+  if (!options.force && nowMs - state.lastGroundTrackRenderMs < minIntervalMs) {
+    groundTrackView.setData(state.groundTrackTracks, {
+      selectedIds: state.selectedIds,
+      elapsedSeconds: state.elapsedSeconds,
+      isPlaying: state.isPlaying,
     });
     return;
   }
 
+  state.lastGroundTrackRenderMs = nowMs;
+  rebuildGroundTrackTracksFromCache();
   groundTrackView.setData(state.groundTrackTracks, {
     selectedIds: state.selectedIds,
     elapsedSeconds: state.elapsedSeconds,
@@ -1453,6 +1426,8 @@ function renderGroundTrack(options = {}) {
 }
 
 function exportGroundTrackPng() {
+  syncGroundTrackHistories();
+  rebuildGroundTrackTracksFromCache();
   groundTrackView.setData(state.groundTrackTracks, {
     selectedIds: state.selectedIds,
     elapsedSeconds: state.elapsedSeconds,
@@ -1461,12 +1436,6 @@ function exportGroundTrackPng() {
   const png = groundTrackView.capturePng({ width: 1920, height: 1080 });
   const prefix = (state.exportNamePrefix || 'ground-track').trim() || 'ground-track';
   downloadDataUrl(`${prefix}-${currentTimestampLabel()}.png`, png);
-}
-
-async function exportGroundTrackCsv() {
-  const csv = await backend.groundTrackCsv({ tracks: state.groundTrackTracks });
-  const prefix = (state.exportNamePrefix || 'ground-track').trim() || 'ground-track';
-  downloadText(`${prefix}-${currentTimestampLabel()}.csv`, csv, 'text/csv');
 }
 
 function loadImageFromDataUrl(dataUrl) {
@@ -1531,9 +1500,11 @@ function renderUi() {
   syncGroundTrackControlsFromState();
   syncGroundTrackOptionControls();
   syncSettingsControls();
+  currentGroundTrackBudget();
   applyGroundTrackPanelState();
   renderGroundTrackFilters();
   renderAssetLibrary();
+  syncGroundTrackHistories();
   renderGroundTrack({ force: true });
 }
 
@@ -1574,11 +1545,10 @@ async function importJson(file) {
     const payload = JSON.parse(text);
     const snapshot = payload.snapshot ?? payload;
     if (!Array.isArray(snapshot.orbits)) throw new Error('JSON 中缺少 orbits 数组。');
-    await applyWorkbenchSnapshot(snapshot);
+    applyWorkbenchSnapshot(snapshot);
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
-    await refreshSceneRenderData({ force: true });
     renderUi();
     saveState();
   } catch (error) {
@@ -1593,21 +1563,17 @@ async function importTxt(file) {
   try {
     const text = await file.text();
     const parsed = parseOrbitText(text);
-    const imported = [];
-    for (const [index, item] of parsed.entries()) {
-      imported.push(await buildOrbitRecord(item, {
-        id: uuid(),
-        color: nextOrbitColor(index),
-        visible: true,
-      }));
-    }
+    const imported = parsed.map((item, index) => buildOrbitRecord(item, {
+      id: uuid(),
+      color: nextOrbitColor(index),
+      visible: true,
+    }));
     state.orbits = imported;
     setSelectedOrbitIds(imported[0] ? [imported[0].id] : [], { currentId: imported[0]?.id ?? null });
     state.editingId = null;
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
-    await refreshSceneRenderData({ force: true });
     resetForm();
     renderUi();
     saveState();
@@ -1668,10 +1634,9 @@ function bindEvents() {
   }
 
   for (const button of document.querySelectorAll('[data-frame-option]')) {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       state.frame = button.dataset.frameOption;
       markSceneDirty();
-      await refreshSceneRenderData({ force: true });
       renderUi();
       closeStatusCards();
       saveState();
@@ -1679,12 +1644,11 @@ function bindEvents() {
   }
 
   for (const button of document.querySelectorAll('[data-perturbation-model]')) {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       if (state.perturbationModel !== button.dataset.perturbationModel) {
         state.perturbationModel = button.dataset.perturbationModel;
         clearGroundTrackHistories();
         markSceneDirty();
-        await refreshSceneRenderData({ force: true });
       }
       renderUi();
       closeStatusCards();
@@ -1704,12 +1668,12 @@ function bindEvents() {
     });
   }
 
-  els.form.addEventListener('submit', async (event) => {
+  els.form.addEventListener('submit', (event) => {
     event.preventDefault();
     try {
       const raw = formToElements();
       const existingIndex = state.orbits.findIndex((orbit) => orbit.id === state.editingId);
-      const record = await buildOrbitRecord(raw, {
+      const record = buildOrbitRecord(raw, {
         id: state.editingId ?? undefined,
         color: getFormColor(),
         visible: existingIndex >= 0 ? state.orbits[existingIndex].visible : true,
@@ -1722,7 +1686,6 @@ function bindEvents() {
       }
       setSelectedOrbitIds([...state.selectedIds.filter((id) => id !== record.id), record.id], { currentId: record.id });
       markSceneDirty();
-      await refreshSceneRenderData({ force: true });
       clearErrors();
       resetForm();
       renderUi();
@@ -1744,7 +1707,7 @@ function bindEvents() {
     els.runDurationLimit.value = String(state.runLimitSeconds);
   });
   els.pauseButton.addEventListener('click', pausePlayback);
-  els.resetTime.addEventListener('click', async () => {
+  els.resetTime.addEventListener('click', () => {
     state.elapsedSeconds = 0;
     clearGroundTrackHistories();
     if (state.isPlaying) {
@@ -1754,7 +1717,6 @@ function bindEvents() {
     } else {
       state.runStartedAtMs = null;
     }
-    await refreshSceneRenderData({ force: true });
     renderUi();
   });
   els.frontView.addEventListener('click', () => scene.setView('front'));
@@ -1774,6 +1736,7 @@ function bindEvents() {
     state.simulationStartUtc = els.simulationStartUtc.value || utcDatetimeLocalValue(new Date());
     markSceneDirty();
     clearGroundTrackHistories();
+    syncGroundTrackHistories();
     renderGroundTrack({ force: true });
     saveState();
   });
@@ -1785,6 +1748,8 @@ function bindEvents() {
     input.addEventListener('change', () => {
       syncGroundTrackWindowFromControls();
       markSceneDirty();
+      pruneGroundTrackHistoriesToWindow();
+      syncGroundTrackHistories();
       renderGroundTrack({ force: true });
       saveState();
     });
@@ -1794,13 +1759,15 @@ function bindEvents() {
     syncGroundTrackControlsFromState();
     syncGroundTrackWindowFromControls();
     markSceneDirty();
+    pruneGroundTrackHistoriesToWindow();
+    syncGroundTrackHistories();
     renderGroundTrack({ force: true });
     saveState();
   });
   for (const input of [els.performanceMode, els.customMemory]) {
-    input.addEventListener('change', async () => {
+    input.addEventListener('change', () => {
       syncPerformanceFromControls();
-      await refreshSceneRenderData({ force: true });
+      syncGroundTrackHistories();
       renderGroundTrack({ force: true });
       saveState();
     });
@@ -1825,9 +1792,6 @@ function bindEvents() {
   els.assetSaveGroup.addEventListener('click', saveCurrentAssetGroup);
   els.assetRenameGroup.addEventListener('click', () => renameAssetGroup());
   els.exportGroundTrackPng.addEventListener('click', exportGroundTrackPng);
-  if (els.groundTrackCsv) {
-    els.groundTrackCsv.addEventListener('click', () => exportGroundTrackCsv().catch((error) => showErrors(error.message || error)));
-  }
   els.infoClose.addEventListener('click', closeActiveModule);
   els.infoModal.addEventListener('pointerdown', (event) => {
     if (event.target === els.infoModal) closeActiveModule();
@@ -1853,26 +1817,10 @@ function bindEvents() {
     groundTrackView.resize();
     renderGroundTrack({ force: true });
   });
-  groundTrackView.setRegionSelectedCallback(async (bounds) => {
-    try {
-      const stats = await backend.groundTrackRegionStats({
-        tracks: state.groundTrackTracks,
-        bounds,
-      });
-      renderGroundTrackStats(stats);
-      groundTrackView.setSelectionStats(stats);
-    } catch {
-      const emptyStats = {
-        totalPointCount: 0,
-        totalOrbitCount: 0,
-        items: [],
-        bounds,
-        earliestUtcMs: null,
-        latestUtcMs: null,
-      };
-      renderGroundTrackStats(emptyStats);
-      groundTrackView.setSelectionStats(emptyStats);
-    }
+  groundTrackView.setRegionSelectedCallback((bounds) => {
+    const stats = groundTrackRegionStats(state.groundTrackTracks, bounds);
+    renderGroundTrackStats(stats);
+    groundTrackView.setSelectionStats(stats);
   });
   scene.setOrbitHoverCallback(showOrbitTooltip);
 }
@@ -1891,31 +1839,18 @@ function tick(nowMs) {
     }
   }
   updateTimeReadout();
-  if (state.sceneRenderData) {
-    scene.applyRenderData({
-      ...state.sceneRenderData,
-      elapsedSeconds: state.elapsedSeconds,
-    });
-  }
+  scene.update(state.orbits, state.elapsedSeconds, state.perturbationModel);
   if (state.orbits.length > 0) renderMetrics();
+  syncGroundTrackHistories();
   if (state.groundTrackPanel !== 'closed') renderGroundTrack();
   requestAnimationFrame(tick);
 }
 
-async function init() {
-  if (!state.simulationStartUtc) state.simulationStartUtc = utcDatetimeLocalValue(new Date());
-  restoreAssetLibrary();
-  await restoreState();
-  bindEvents();
-  setOverlaysFromInputs({ markDirty: false });
-  if (DEFAULT_ORBIT_COLORS.length > 0 && !state.editingId) setNextFormColor();
-  await refreshSceneRenderData({ force: true });
-  renderUi();
-  requestAnimationFrame(tick);
-}
-
-init().catch((error) => {
-  showErrors(error.message || error);
-  renderUi();
-  requestAnimationFrame(tick);
-});
+if (!state.simulationStartUtc) state.simulationStartUtc = utcDatetimeLocalValue(new Date());
+restoreAssetLibrary();
+restoreState();
+bindEvents();
+setOverlaysFromInputs({ markDirty: false });
+if (DEFAULT_ORBIT_COLORS.length > 0 && !state.editingId) setNextFormColor();
+renderUi();
+requestAnimationFrame(tick);

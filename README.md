@@ -3,30 +3,9 @@
 
 ## 启动
 
-双击 `start-workbench.bat` 启动前端静态服务和后端 API 服务，并打开网页。默认地址：
+双击 `start-workbench.bat` 启动本地服务并打开网页。默认地址为 `http://127.0.0.1:4173`。
 
-- 前端页面：`http://127.0.0.1:4173`
-- 后端 API：`http://127.0.0.1:26563`
-
-如需手动启动，可在项目目录执行：
-
-```powershell
-npm install
-npm run dev
-```
-
-也可以分别启动：
-
-```powershell
-npm run frontend
-npm run backend
-```
-
-如需修改端口，可设置 `PORT` 或 `API_PORT` 后再运行启动脚本。
-
-## 架构
-
-本项目使用两个本地进程：前端静态服务负责页面资源和浏览器交互，Fastify 后端 API 服务负责轨道计算、摄动传播、3D 可绘制数据、星下点路径、区域统计和 CSV 数据生成。Three.js 和 Canvas 仍在浏览器中负责实际绘制。
+如需手动启动，可在项目目录执行 `node server.mjs`。如需修改端口，可先设置 `PORT`，例如 `set PORT=4180` 后再运行启动脚本。
 
 ## 功能
 

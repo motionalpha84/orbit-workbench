@@ -9,10 +9,7 @@ import {
   earthRotationAngleAt,
   frameAxesRotationAngleAt,
   orbitReferenceSampleCount,
-  playbackSampleAt,
   projectPointerToArcball,
-  referencePointsSignature,
-  renderTimingAngles,
 } from '../js/scene.mjs';
 import { computeOrbit } from '../js/orbit.mjs';
 
@@ -74,24 +71,6 @@ test('rotates only ECEF axes with Earth sidereal time', () => {
   nearlyEqual(frameAxesRotationAngleAt('ECEF', quarterDay), Math.PI / 2, 1e-12, 'ECEF axes rotate with Earth');
 });
 
-test('derives playback timing angles from the current elapsed seconds', () => {
-  const quarterDay = EARTH_SIDEREAL_DAY_SECONDS / 4;
-  const angles = renderTimingAngles('ECEF', quarterDay);
-
-  nearlyEqual(angles.earthRotationAngleRad, Math.PI / 2, 1e-12, 'earth angle follows elapsed time');
-  nearlyEqual(angles.frameAxesRotationAngleRad, Math.PI / 2, 1e-12, 'ECEF axes follow elapsed time');
-});
-
-test('builds a stable signature for reference point payloads', () => {
-  const points = [
-    { elapsedSeconds: 0, scenePoint: { x: 1, y: 2, z: 3 } },
-    { elapsedSeconds: 10, scenePoint: { x: 4, y: 5, z: 6 } },
-  ];
-
-  assert.equal(referencePointsSignature(points), referencePointsSignature(points));
-  assert.notEqual(referencePointsSignature(points), referencePointsSignature(points.slice(0, 1)));
-});
-
 test('uses more reference samples for larger orbits to keep visual point density stable', () => {
   const smallOrbit = computeOrbit({
     semiMajorAxisKm: 7000,
@@ -113,17 +92,4 @@ test('uses more reference samples for larger orbits to keep visual point density
   assert.ok(orbitReferenceSampleCount(largeOrbit) > orbitReferenceSampleCount(smallOrbit));
   assert.ok(orbitReferenceSampleCount(smallOrbit) >= 180);
   assert.ok(orbitReferenceSampleCount(largeOrbit) <= 2400);
-});
-
-test('interpolates playback samples by wrapped elapsed seconds', () => {
-  const samples = [
-    { elapsedSeconds: 0, scenePoint: { x: 0, y: 0, z: 0 } },
-    { elapsedSeconds: 10, scenePoint: { x: 10, y: 0, z: 0 } },
-  ];
-
-  const mid = playbackSampleAt(samples, 5, 20);
-  const wrapped = playbackSampleAt(samples, 15, 20);
-
-  nearlyEqual(mid.scenePoint.x, 5, 1e-12, 'midpoint x');
-  nearlyEqual(wrapped.scenePoint.x, 5, 1e-12, 'wrapped x');
 });

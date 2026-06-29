@@ -1608,11 +1608,7 @@ function renderVelocityCircle(options = {}) {
   const nowMs = performance.now();
   const minIntervalMs = state.isPlaying ? 180 : 700;
   if (!options.force && nowMs - state.lastVelocityCircleRenderMs < minIntervalMs) {
-    velocityCircleView.setData(state.velocityCircleTracks, {
-      selectedIds: state.selectedIds,
-      elapsedSeconds: state.elapsedSeconds,
-      isPlaying: state.isPlaying,
-    });
+    velocityCircleView.render();
     return;
   }
 

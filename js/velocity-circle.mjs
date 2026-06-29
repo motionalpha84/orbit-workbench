@@ -6,6 +6,10 @@ import {
 
 const DEFAULT_SAMPLE_COUNT = 180;
 const DEFAULT_TRAIL_SAMPLE_COUNT = 24;
+const MIN_SAMPLE_COUNT = 12;
+const MAX_SAMPLE_COUNT = 720;
+const MIN_TRAIL_SAMPLE_COUNT = 2;
+const MAX_TRAIL_SAMPLE_COUNT = 96;
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -44,14 +48,12 @@ export function velocityTrailSpanSeconds(orbit) {
 
 function normalizeSampleCount(sampleCount) {
   const count = Math.floor(finiteNumber(sampleCount, DEFAULT_SAMPLE_COUNT));
-  if (count <= 0) return DEFAULT_SAMPLE_COUNT;
-  return count;
+  return clamp(count, MIN_SAMPLE_COUNT, MAX_SAMPLE_COUNT);
 }
 
 function normalizeTrailSampleCount(sampleCount) {
   const count = Math.floor(finiteNumber(sampleCount, DEFAULT_TRAIL_SAMPLE_COUNT));
-  if (count <= 0) return DEFAULT_TRAIL_SAMPLE_COUNT;
-  return count;
+  return clamp(count, MIN_TRAIL_SAMPLE_COUNT, MAX_TRAIL_SAMPLE_COUNT);
 }
 
 function velocityPoint(orbit, elapsedSeconds, perturbationModel) {

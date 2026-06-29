@@ -4,6 +4,7 @@ const DEFAULT_RADIUS_KMS = 8;
 const DEFAULT_SCENE_RADIUS = 2.8;
 const MIN_CAMERA_DISTANCE = 2.2;
 const MAX_CAMERA_DISTANCE = 12;
+const DEFAULT_READOUT_HTML = '悬停速度矢量后显示读数。';
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -101,6 +102,56 @@ export function buildVelocityHitPayload(track, point = track?.current) {
   };
 }
 
+function linePositionAt(attribute, index) {
+  return new THREE.Vector3(
+    attribute.getX(index),
+    attribute.getY(index),
+    attribute.getZ(index),
+  );
+}
+
+export function velocityHitPayloadForIntersection(intersection) {
+  const object = intersection?.object;
+  const payloads = object?.userData?.velocityHitPayloads;
+  if (!Array.isArray(payloads) || payloads.length === 0) {
+    return object?.userData?.velocityHit ?? null;
+  }
+
+  const position = object.geometry?.getAttribute?.('position');
+  const maxIndex = Math.min(payloads.length, position?.count ?? payloads.length) - 1;
+  if (maxIndex < 0) return object?.userData?.velocityHit ?? null;
+
+  const candidates = new Set();
+  const segmentIndex = Number.isInteger(intersection.index) ? intersection.index : null;
+  if (segmentIndex === null) {
+    for (let index = 0; index <= maxIndex; index += 1) candidates.add(index);
+  } else {
+    candidates.add(clamp(segmentIndex, 0, maxIndex));
+    candidates.add(clamp(segmentIndex + 1, 0, maxIndex));
+  }
+
+  const worldPoint = intersection.point?.clone?.();
+  const localPoint = worldPoint && object.worldToLocal
+    ? object.worldToLocal(worldPoint)
+    : worldPoint;
+  const candidateIndexes = [...candidates];
+  if (!position || !localPoint) {
+    return payloads[candidateIndexes[0]] ?? object.userData.velocityHit ?? null;
+  }
+
+  let nearestIndex = candidateIndexes[0];
+  let nearestDistance = Infinity;
+  for (const index of candidateIndexes) {
+    const distance = linePositionAt(position, index).distanceToSquared(localPoint);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  }
+
+  return payloads[nearestIndex] ?? object.userData.velocityHit ?? null;
+}
+
 function velocityTooltipHtml(payload) {
   return `
     <strong>${escapeHtml(payload.name)}</strong>
@@ -124,6 +175,7 @@ export class VelocityCircleView {
     this.canvas = canvas ?? null;
     this.tooltip = tooltip ?? null;
     this.readout = readout ?? null;
+    this.defaultReadoutHtml = this.readout?.innerHTML ?? DEFAULT_READOUT_HTML;
     this.tracks = [];
     this.selectedIds = [];
     this.elapsedSeconds = 0;
@@ -180,8 +232,8 @@ export class VelocityCircleView {
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
     this.canvas.addEventListener('pointercancel', this.onPointerUp);
-    this.canvas.addEventListener('pointerleave', () => {
-      this.onPointerUp({});
+    this.canvas.addEventListener('pointerleave', (event) => {
+      this.onPointerUp(event);
       this.hideTooltip();
     });
     this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
@@ -298,11 +350,10 @@ export class VelocityCircleView {
       const referenceOpacity = isMuted ? 0.1 : 0.36;
       const trailOpacity = isMuted ? 0.24 : 0.72;
 
-      const velocityHitPayload = buildVelocityHitPayload(track, track.current);
-      const sampleLine = this.makeLine(track.samples ?? [], track.color, referenceOpacity, 1, velocityHitPayload);
+      const sampleLine = this.makeLine(track.samples ?? [], track.color, referenceOpacity, 1, track);
       if (sampleLine) this.trackRoot.add(sampleLine);
 
-      const trailLine = this.makeLine(track.trail ?? [], track.color, trailOpacity, 2, velocityHitPayload);
+      const trailLine = this.makeLine(track.trail ?? [], track.color, trailOpacity, 2, track);
       if (trailLine) this.trackRoot.add(trailLine);
 
       const arrow = this.makeArrow(track);
@@ -324,11 +375,11 @@ export class VelocityCircleView {
     });
   }
 
-  makeLine(points, color, opacity, lineWidth = 1, velocityHitPayload = null) {
-    const vectors = (Array.isArray(points) ? points : [])
-      .map((point) => pointVelocity(point))
-      .filter(Boolean)
-      .map((vector) => velocityVectorToScene(vector, this.scale));
+  makeLine(points, color, opacity, lineWidth = 1, track = null) {
+    const entries = (Array.isArray(points) ? points : [])
+      .map((point) => ({ point, velocity: pointVelocity(point) }))
+      .filter((entry) => entry.velocity);
+    const vectors = entries.map((entry) => velocityVectorToScene(entry.velocity, this.scale));
     if (vectors.length < 2) return null;
 
     const geometry = new THREE.BufferGeometry().setFromPoints(vectors);
@@ -340,8 +391,10 @@ export class VelocityCircleView {
       linewidth: lineWidth,
     });
     const line = new THREE.Line(geometry, material);
-    if (velocityHitPayload) {
-      line.userData.velocityHit = velocityHitPayload;
+    if (track) {
+      const payloads = entries.map((entry) => buildVelocityHitPayload(track, entry.point));
+      line.userData.velocityHitPayloads = payloads;
+      line.userData.velocityHit = payloads.at(-1) ?? null;
       this.pickTargets.push(line);
     }
     return line;
@@ -399,7 +452,7 @@ export class VelocityCircleView {
     event.preventDefault?.();
     this.isDragging = true;
     this.lastPointer = { x: event.clientX ?? 0, y: event.clientY ?? 0 };
-    this.canvas?.setPointerCapture?.(event.pointerId);
+    if (event.pointerId != null) this.canvas?.setPointerCapture?.(event.pointerId);
   }
 
   onPointerMove(event) {
@@ -422,7 +475,10 @@ export class VelocityCircleView {
 
   onPointerUp(event) {
     this.isDragging = false;
-    this.canvas?.releasePointerCapture?.(event.pointerId);
+    const pointerId = event?.pointerId;
+    if (pointerId != null && this.canvas?.hasPointerCapture?.(pointerId)) {
+      this.canvas.releasePointerCapture?.(pointerId);
+    }
   }
 
   onWheel(event) {
@@ -448,10 +504,11 @@ export class VelocityCircleView {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hit = this.raycaster
       .intersectObjects(this.pickTargets, true)
-      .find((item) => item.object.userData.velocityHit);
+      .find((item) => item.object.userData.velocityHit || Array.isArray(item.object.userData.velocityHitPayloads));
+    const payload = velocityHitPayloadForIntersection(hit);
 
-    if (hit?.object.userData.velocityHit) {
-      this.showTooltip(hit.object.userData.velocityHit, event);
+    if (payload) {
+      this.showTooltip(payload, event);
     } else {
       this.hideTooltip();
     }
@@ -481,7 +538,10 @@ export class VelocityCircleView {
 
   hideTooltip() {
     if (this.tooltip) this.tooltip.hidden = true;
-    if (this.readout) this.readout.hidden = true;
+    if (this.readout) {
+      this.readout.innerHTML = this.defaultReadoutHtml;
+      this.readout.hidden = false;
+    }
   }
 
   render() {

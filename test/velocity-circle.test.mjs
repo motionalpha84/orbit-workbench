@@ -90,7 +90,7 @@ test('builds a short trail that ends at the current velocity endpoint', () => {
   assert.ok(velocityTrailSpanSeconds(record.orbit) > 0);
 });
 
-test('honors small positive sample count requests', () => {
+test('clamps too-small sample count requests to minimums', () => {
   const record = orbitRecord();
   const elapsedSeconds = 300;
   const track = sampleVelocityCircle({
@@ -100,10 +100,23 @@ test('honors small positive sample count requests', () => {
     trailSampleCount: 1,
   });
 
-  assert.equal(track.samples.length, 4);
-  assert.equal(track.trail.length, 1);
-  assert.equal(track.trail[0].elapsedSeconds, elapsedSeconds);
+  assert.equal(track.samples.length, 13);
+  assert.equal(track.trail.length, 2);
+  assert.equal(track.trail.at(-1).elapsedSeconds, elapsedSeconds);
   nearlyEqual(track.samples.at(-1).elapsedSeconds, elapsedSeconds + record.orbit.periodSeconds, 1e-9, 'small sample endpoint');
+});
+
+test('clamps excessive sample and trail count requests to maximums', () => {
+  const record = orbitRecord();
+  const track = sampleVelocityCircle({
+    orbitRecord: record,
+    elapsedSeconds: 300,
+    sampleCount: 900,
+    trailSampleCount: 200,
+  });
+
+  assert.equal(track.samples.length, 721);
+  assert.equal(track.trail.length, 96);
 });
 
 test('passes perturbation models through to every sampled point', () => {

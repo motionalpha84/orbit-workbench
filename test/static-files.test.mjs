@@ -204,6 +204,11 @@ test('velocity-circle static UI contract is present', async () => {
   assert.match(app, /function isVelocityCirclePanelOpen\(\)[\s\S]*state\.activeModule === 'velocityCircle'[\s\S]*!\['closed', 'minimized'\]\.includes\(state\.velocityCirclePanel\)/, 'velocity-circle work should require an actively open panel');
   assert.match(app, /if \(isVelocityCirclePanelOpen\(\)\) renderVelocityCircle\(\)/, 'tick should skip inactive or minimized velocity-circle work');
   assert.doesNotMatch(app, /if \(state\.velocityCirclePanel !== 'closed'\) renderVelocityCircle\(\)/, 'tick should not render minimized velocity-circle panels');
+  const throttledVelocityCircleBranch = app.match(
+    /function renderVelocityCircle\(options = \{\}\) \{[\s\S]*?if \(!options\.force && nowMs - state\.lastVelocityCircleRenderMs < minIntervalMs\) \{([\s\S]*?)\n  \}\n\n  state\.lastVelocityCircleRenderMs = nowMs/,
+  )?.[1] ?? '';
+  assert.notEqual(throttledVelocityCircleBranch, '', 'velocity-circle render throttle branch should be discoverable');
+  assert.doesNotMatch(throttledVelocityCircleBranch, /velocityCircleView\.setData|rebuildVelocityCircleTracks/, 'throttled velocity-circle ticks should not rebuild track geometry');
   assert.match(app, /moduleName === 'velocityCircle' && !preview && \['closed', 'minimized'\]\.includes\(state\.velocityCirclePanel\)/, 'hover preview should not promote velocity-circle panel mode');
   assert.match(app, /state\.velocityCircleFilters\[id\] = true/, 'new velocity-circle filters should default on');
 });

@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import {
+import * as velocityCircleViewModule from '../js/velocity-circle-view.mjs';
+
+const {
   buildVelocityHitPayload,
   formatVelocityNumber,
   velocityBounds,
   velocitySceneScale,
   velocityVectorToScene,
   VelocityCircleView,
-} from '../js/velocity-circle-view.mjs';
+} = velocityCircleViewModule;
 
 const track = {
   id: 'orbit-a',
@@ -22,12 +24,13 @@ const track = {
     perturbationModel: 'j2',
   },
   samples: [
-    { velocityKmS: { x: 1, y: 0, z: 0 }, speedKmS: 1 },
-    { velocityKmS: { x: 0, y: -3, z: 0 }, speedKmS: 3 },
-    { velocityKmS: { x: 0, y: 0, z: 6 }, speedKmS: 6 },
+    { elapsedSeconds: 40, velocityKmS: { x: 1, y: 0, z: 0 }, speedKmS: 1, perturbationModel: 'j2' },
+    { elapsedSeconds: 41, velocityKmS: { x: 0, y: -3, z: 0 }, speedKmS: 3, perturbationModel: 'j2' },
+    { elapsedSeconds: 42, velocityKmS: { x: 0, y: 0, z: 6 }, speedKmS: 6, perturbationModel: 'j2' },
   ],
   trail: [
-    { velocityKmS: { x: 1, y: 1, z: 1 }, speedKmS: 1.732 },
+    { elapsedSeconds: 37, velocityKmS: { x: 1, y: 1, z: 1 }, speedKmS: 1.732, perturbationModel: 'j2' },
+    { elapsedSeconds: 39, velocityKmS: { x: 1.1, y: 1.1, z: 1.1 }, speedKmS: 1.905, perturbationModel: 'j2' },
   ],
 };
 
@@ -118,17 +121,86 @@ test('fixed-size PNG capture uses pixel ratio 1 and restores renderer size and c
   ]);
 });
 
-test('reference and trail lines are registered as hover targets with velocity payloads', () => {
+test('pointer capture release is guarded for uncaptured leave and up paths', () => {
+  const listeners = new Map();
+  const capturedPointers = new Set();
+  let releaseCount = 0;
+  const canvas = {
+    addEventListener(type, handler) {
+      listeners.set(type, handler);
+    },
+    hasPointerCapture(pointerId) {
+      return capturedPointers.has(pointerId);
+    },
+    releasePointerCapture(pointerId) {
+      if (!capturedPointers.has(pointerId)) {
+        throw new Error(`release without capture: ${pointerId}`);
+      }
+      capturedPointers.delete(pointerId);
+      releaseCount += 1;
+    },
+  };
+  const view = new VelocityCircleView({ canvas });
+
+  view.bindEvents();
+
+  assert.doesNotThrow(() => listeners.get('pointerleave')({ pointerId: 7 }));
+  assert.doesNotThrow(() => view.onPointerUp({ pointerId: 8 }));
+  capturedPointers.add(9);
+  assert.doesNotThrow(() => view.onPointerUp({ pointerId: 9 }));
+  assert.equal(releaseCount, 1);
+});
+
+test('line hover helper derives payload from the nearest sampled velocity point', () => {
+  const helper = velocityCircleViewModule.velocityHitPayloadForIntersection;
+  assert.equal(typeof helper, 'function');
+
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(10, 0, 0),
+      new THREE.Vector3(20, 0, 0),
+    ]),
+    new THREE.LineBasicMaterial(),
+  );
+  line.userData.velocityHit = { elapsedSeconds: 999, speedKmS: 999 };
+  line.userData.velocityHitPayloads = [
+    { elapsedSeconds: 0, speedKmS: 1 },
+    { elapsedSeconds: 10, speedKmS: 2 },
+    { elapsedSeconds: 20, speedKmS: 3 },
+  ];
+
+  const payload = helper({
+    object: line,
+    index: 0,
+    point: new THREE.Vector3(9.6, 0, 0),
+  });
+
+  assert.equal(payload.elapsedSeconds, 10);
+  assert.equal(payload.speedKmS, 2);
+});
+
+test('reference and trail lines are registered as hover targets with sampled velocity payloads', () => {
   const view = new VelocityCircleView({});
   view.trackRoot = new THREE.Group();
   view.setData([track], { selectedIds: ['orbit-a'], elapsedSeconds: 42 });
 
-  const lineTargets = view.pickTargets.filter((target) => target.isLine);
-  assert.ok(lineTargets.length >= 2);
-  for (const target of lineTargets) {
-    assert.equal(target.userData.velocityHit.id, 'orbit-a');
-    assert.equal(target.userData.velocityHit.speedKmS, 7.654321);
-  }
+  const sampledLineTargets = view.pickTargets.filter(
+    (target) => target.isLine && Array.isArray(target.userData.velocityHitPayloads),
+  );
+  assert.equal(sampledLineTargets.length, 2);
+  assert.ok(sampledLineTargets.some((target) => target.userData.velocityHitPayloads.length === track.samples.length));
+  assert.ok(sampledLineTargets.some((target) => target.userData.velocityHitPayloads.length === track.trail.length));
+
+  const referenceLine = sampledLineTargets.find((target) => target.userData.velocityHitPayloads.length === track.samples.length);
+  assert.deepEqual(
+    referenceLine.userData.velocityHitPayloads.map((payload) => payload.elapsedSeconds),
+    track.samples.map((point) => point.elapsedSeconds),
+  );
+  assert.deepEqual(
+    referenceLine.userData.velocityHitPayloads.map((payload) => payload.speedKmS),
+    track.samples.map((point) => point.speedKmS),
+  );
 });
 
 test('tooltip is positioned in canvas-local coordinates', () => {
@@ -146,4 +218,71 @@ test('tooltip is positioned in canvas-local coordinates', () => {
 
   assert.equal(tooltip.style.left, '54px');
   assert.equal(tooltip.style.top, '54px');
+});
+
+test('hover readout uses nearest sampled payload for reference lines', () => {
+  const view = new VelocityCircleView({
+    canvas: {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+      clientWidth: 100,
+      clientHeight: 100,
+    },
+  });
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(10, 0, 0),
+      new THREE.Vector3(20, 0, 0),
+    ]),
+    new THREE.LineBasicMaterial(),
+  );
+  line.userData.velocityHit = { elapsedSeconds: 999, speedKmS: 999 };
+  line.userData.velocityHitPayloads = [
+    { elapsedSeconds: 0, speedKmS: 1 },
+    { elapsedSeconds: 10, speedKmS: 2 },
+    { elapsedSeconds: 20, speedKmS: 3 },
+  ];
+  view.camera = {};
+  view.pointer = new THREE.Vector2();
+  view.pickTargets = [line];
+  view.raycaster = {
+    setFromCamera() {},
+    intersectObjects() {
+      return [{
+        object: line,
+        index: 0,
+        point: new THREE.Vector3(9.6, 0, 0),
+      }];
+    },
+  };
+  let shownPayload = null;
+  view.showTooltip = (payload) => {
+    shownPayload = payload;
+  };
+
+  view.updateHover({ clientX: 50, clientY: 50 });
+
+  assert.equal(shownPayload.elapsedSeconds, 10);
+  assert.equal(shownPayload.speedKmS, 2);
+});
+
+test('hover exit restores the default readout text', () => {
+  const defaultReadout = '悬停速度矢量后显示读数。';
+  const readout = { innerHTML: defaultReadout, hidden: false };
+  const view = new VelocityCircleView({
+    canvas: {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 240 }),
+      clientWidth: 400,
+      clientHeight: 240,
+    },
+    readout,
+  });
+
+  view.showTooltip(buildVelocityHitPayload(track, track.current), { clientX: 140, clientY: 90 });
+  assert.notEqual(readout.innerHTML, defaultReadout);
+
+  view.hideTooltip();
+
+  assert.equal(readout.innerHTML, defaultReadout);
+  assert.equal(readout.hidden, false);
 });

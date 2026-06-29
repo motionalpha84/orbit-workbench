@@ -32,6 +32,10 @@ export function velocityMagnitudeKmS(vector = {}) {
   return vectorMagnitude(safe);
 }
 
+function isFiniteVector(vector = {}) {
+  return [vector.x, vector.y, vector.z].every((component) => Number.isFinite(Number(component)));
+}
+
 export function velocityTrailSpanSeconds(orbit) {
   const periodSeconds = finiteNumber(orbit?.periodSeconds, 0);
   if (periodSeconds <= 0) return 120;
@@ -52,7 +56,8 @@ function normalizeTrailSampleCount(sampleCount) {
 
 function velocityPoint(orbit, elapsedSeconds, perturbationModel) {
   const state = propagateOrbit(orbit, elapsedSeconds, { perturbationModel });
-  const velocityKmS = finiteVector(state.velocityKmS);
+  const velocityKmS = state.velocityKmS;
+  if (!isFiniteVector(velocityKmS)) return null;
   return {
     elapsedSeconds,
     velocityKmS,
@@ -64,17 +69,27 @@ function velocityPoint(orbit, elapsedSeconds, perturbationModel) {
 function hasOrbit(record) {
   const orbit = record?.orbit;
   const elements = orbit?.elements;
+  const semiMajorAxisKm = Number(elements?.semiMajorAxisKm);
+  const eccentricity = Number(elements?.eccentricity);
+  const periodSeconds = Number(orbit?.periodSeconds);
+  const meanMotionRadS = Number(orbit?.meanMotionRadS);
   return Boolean(
     orbit
       && elements
-      && Number.isFinite(Number(orbit.periodSeconds))
-      && Number.isFinite(Number(orbit.meanMotionRadS))
+      && Number.isFinite(semiMajorAxisKm)
+      && semiMajorAxisKm > 0
+      && Number.isFinite(eccentricity)
+      && eccentricity >= 0
+      && eccentricity < 1
+      && Number.isFinite(periodSeconds)
+      && periodSeconds > 0
+      && Number.isFinite(meanMotionRadS)
+      && meanMotionRadS > 0
       && Number.isFinite(Number(orbit.initialMeanAnomalyRad))
-      && Number.isFinite(Number(elements.semiMajorAxisKm))
-      && Number.isFinite(Number(elements.eccentricity))
       && Number.isFinite(Number(elements.inclinationRad))
       && Number.isFinite(Number(elements.raanRad))
-      && Number.isFinite(Number(elements.argPeriapsisRad)),
+      && Number.isFinite(Number(elements.argPeriapsisRad))
+      && Number.isFinite(Number(elements.trueAnomalyRad)),
   );
 }
 
@@ -97,14 +112,17 @@ export function sampleVelocityCircle({
     const sampleElapsedSeconds = safeElapsedSeconds + (index / count) * periodSeconds;
     return velocityPoint(orbitRecord.orbit, sampleElapsedSeconds, model);
   });
+  if (samples.some((point) => point === null)) return null;
 
   const trail = Array.from({ length: trailCount }, (_, index) => {
     const fraction = trailCount === 1 ? 1 : index / (trailCount - 1);
     const sampleElapsedSeconds = safeElapsedSeconds - trailSpanSeconds * (1 - fraction);
     return velocityPoint(orbitRecord.orbit, sampleElapsedSeconds, model);
   });
+  if (trail.some((point) => point === null)) return null;
 
   const current = velocityPoint(orbitRecord.orbit, safeElapsedSeconds, model);
+  if (current === null) return null;
 
   return {
     id: orbitRecord.id,

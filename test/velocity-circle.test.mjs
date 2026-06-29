@@ -122,7 +122,7 @@ test('passes perturbation models through to every sampled point', () => {
   }
 });
 
-test('samples multiple visible records and skips invalid records', () => {
+test('samples multiple records and skips invalid records', () => {
   const first = orbitRecord({ id: 'first', name: 'First' });
   const second = orbitRecord({ id: 'second', name: 'Second', semiMajorAxisKm: 14000, eccentricity: 0.22 });
   const tracks = sampleVelocityCircles([first, null, second, { id: 'bad' }], {
@@ -151,4 +151,31 @@ test('returns null and skips malformed orbit records that cannot propagate', () 
   });
 
   assert.deepEqual(tracks.map((track) => track.id), ['valid']);
+});
+
+test('rejects finite but physically invalid orbit records', () => {
+  const record = orbitRecord();
+  const invalidOrbit = {
+    ...record.orbit,
+    elements: {
+      ...record.orbit.elements,
+      eccentricity: 1,
+    },
+  };
+
+  assert.equal(sampleVelocityCircle({ orbitRecord: { ...record, orbit: invalidOrbit } }), null);
+});
+
+test('rejects records when propagation yields non-finite velocity', () => {
+  const record = orbitRecord();
+  const invalidOrbit = {
+    ...record.orbit,
+    elements: {
+      ...record.orbit.elements,
+      semiMajorAxisKm: Number.MIN_VALUE,
+      eccentricity: 0,
+    },
+  };
+
+  assert.equal(sampleVelocityCircle({ orbitRecord: { ...record, orbit: invalidOrbit } }), null);
 });

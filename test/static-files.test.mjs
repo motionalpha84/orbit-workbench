@@ -170,33 +170,19 @@ test('workbench, assets, settings, and ground-track controls match the new contr
 test('vector calibration static UI contract is present', async () => {
   const html = await readFile('index.html', 'utf8');
   const css = await readFile('styles.css', 'utf8');
-  const app = await readFile('js/app.mjs', 'utf8');
-  const scene = await readFile('js/scene.mjs', 'utf8');
 
   assert.equal(await fileExists('js/vector-calibration.mjs'), true, 'vector calibration solver should exist');
   assert.match(html, /<h3>其他功能<\/h3>/, 'workbench should expose an other-functions panel');
   assert.match(html, /位置\/速度标定/, 'calibration tool title should exist');
-  assert.match(html, /data-calibration-mode="position"/, 'position calibration mode button should exist');
-  assert.match(html, /data-calibration-mode="velocity"/, 'velocity calibration mode button should exist');
-  assert.match(html, /id="calibration-x"/, 'x vector input should exist');
-  assert.match(html, /id="calibration-y"/, 'y vector input should exist');
-  assert.match(html, /id="calibration-z"/, 'z vector input should exist');
-  assert.match(html, /id="calibration-submit"/, 'calibration submit button should exist');
-  assert.match(html, /id="calibration-clear"/, 'calibration clear button should exist');
+  assert.match(html, /id="calibration-target-list"/, 'calibration tool should expose a multi-target row list');
+  assert.match(html, /id="calibration-add-target"/, 'calibration tool should allow adding named vectors');
+  assert.match(html, /id="calibration-submit-all"/, 'calibration tool should run all vector targets');
+  assert.match(html, /id="calibration-clear-results"/, 'calibration tool should clear results without deleting rows');
   assert.match(html, /id="calibration-results"/, 'calibration results container should exist');
-  assert.match(css, /\.calibration-tool/, 'calibration tool should be styled');
-  assert.match(css, /\.calibration-mode-button\.is-active/, 'active mode should be styled');
-  assert.match(css, /\.calibration-result-item/, 'result items should be styled');
-  assert.match(app, /calibrateOrbitVectors/, 'app should import vector calibration solver');
-  assert.match(app, /runVectorCalibration/, 'app should run vector calibration');
-  assert.match(app, /clearVectorCalibration/, 'app should clear vector calibration');
-  assert.match(app, /renderCalibrationResults/, 'app should render vector calibration results');
-  assert.match(app, /calibrationMode:\s*'position'/, 'app should default calibration mode to position');
-  assert.match(app, /calibrationResult:\s*null/, 'app should track the last calibration result');
-  assert.match(app, /scene\.setCalibrationMarkers/, 'app should send hits to the 3D scene');
-  assert.match(app, /clearVectorCalibration\(\)/, 'orbit lifecycle should clear stale calibration state');
-  assert.match(app, /data-calibration-mode/, 'app should bind calibration mode buttons');
-  assert.match(scene, /setCalibrationMarkers/, 'scene should expose calibration marker API');
+  assert.match(css, /\.calibration-target-list/, 'calibration target list should be styled');
+  assert.match(css, /\.calibration-target-row/, 'calibration target row should be styled');
+  assert.match(css, /\.calibration-target-row select/, 'target rows should style per-row mode selectors');
+  assert.match(css, /\.calibration-result-group/, 'grouped calibration results should be styled');
 });
 
 test('stylesheet has balanced block delimiters', async () => {

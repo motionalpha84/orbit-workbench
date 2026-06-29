@@ -1448,66 +1448,75 @@ select {
   font-size: 11px;
 }
 
-.calibration-mode-control {
+.calibration-target-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.calibration-mode-button {
-  min-height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--muted);
-  background: rgba(5, 14, 20, 0.58);
-  font-size: 12px;
-}
-
-.calibration-mode-button.is-active {
-  color: var(--text);
-  border-color: rgba(86, 140, 135, 0.82);
-  background: rgba(35, 80, 76, 0.72);
-  box-shadow: 0 0 18px rgba(86, 140, 135, 0.18);
-}
-
-.calibration-vector-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.calibration-vector-grid label {
+.calibration-target-row {
   display: grid;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 12px;
+  grid-template-columns: minmax(72px, 1.1fr) minmax(74px, 0.85fr) repeat(3, minmax(48px, 0.72fr)) 34px;
+  gap: 6px;
+  align-items: end;
+  border: 1px solid rgba(150, 190, 184, 0.14);
+  border-radius: 6px;
+  padding: 8px;
+  background: rgba(5, 14, 20, 0.34);
 }
 
-.calibration-vector-grid input {
+.calibration-target-row label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.calibration-target-row input,
+.calibration-target-row select {
   width: 100%;
-  height: 34px;
+  height: 32px;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 0 7px;
   color: var(--text);
   background: rgba(5, 14, 20, 0.8);
   font-family: var(--mono);
+  font-size: 12px;
 }
 
-.calibration-vector-grid input:focus {
+.calibration-target-row input:focus,
+.calibration-target-row select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(86, 140, 135, 0.16);
 }
 
+.calibration-target-remove {
+  width: 34px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(5, 14, 20, 0.58);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.calibration-target-remove:hover {
+  color: var(--text);
+  border-color: rgba(242, 121, 121, 0.44);
+}
+
 .calibration-actions {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 1fr auto;
   gap: 8px;
 }
 
 .calibration-results {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   min-height: 42px;
   border: 1px solid rgba(150, 190, 184, 0.16);
   border-radius: 6px;
@@ -1521,6 +1530,36 @@ select {
 .calibration-result-summary {
   color: var(--text);
   font-weight: 700;
+}
+
+.calibration-result-group {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid rgba(148, 176, 190, 0.12);
+  padding-top: 9px;
+}
+
+.calibration-result-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.calibration-result-group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calibration-result-group-header strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.calibration-result-group-header span {
+  color: var(--subtle);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .calibration-result-item {
@@ -1556,6 +1595,16 @@ select {
 
 .calibration-result-item.is-nearest {
   border-color: rgba(242, 222, 121, 0.28);
+}
+
+@media (max-width: 760px) {
+  .calibration-target-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .calibration-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .toggle-row {

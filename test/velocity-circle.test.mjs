@@ -90,6 +90,22 @@ test('builds a short trail that ends at the current velocity endpoint', () => {
   assert.ok(velocityTrailSpanSeconds(record.orbit) > 0);
 });
 
+test('honors small positive sample count requests', () => {
+  const record = orbitRecord();
+  const elapsedSeconds = 300;
+  const track = sampleVelocityCircle({
+    orbitRecord: record,
+    elapsedSeconds,
+    sampleCount: 3,
+    trailSampleCount: 1,
+  });
+
+  assert.equal(track.samples.length, 4);
+  assert.equal(track.trail.length, 1);
+  assert.equal(track.trail[0].elapsedSeconds, elapsedSeconds);
+  nearlyEqual(track.samples.at(-1).elapsedSeconds, elapsedSeconds + record.orbit.periodSeconds, 1e-9, 'small sample endpoint');
+});
+
 test('passes perturbation models through to every sampled point', () => {
   const record = orbitRecord({ semiMajorAxisKm: 8200, eccentricity: 0.18, inclinationDeg: 63.4 });
   for (const perturbationModel of ['j2', 'j3']) {
@@ -120,4 +136,19 @@ test('samples multiple visible records and skips invalid records', () => {
   assert.deepEqual(tracks.map((track) => track.id), ['first', 'second']);
   assert.ok(tracks.every((track) => track.samples.length === 13));
   assert.ok(tracks.every((track) => track.trail.length === 3));
+});
+
+test('returns null and skips malformed orbit records that cannot propagate', () => {
+  const valid = orbitRecord({ id: 'valid', name: 'Valid' });
+  const malformed = { id: 'bad', orbit: { periodSeconds: 100 } };
+
+  assert.equal(sampleVelocityCircle({ orbitRecord: malformed, elapsedSeconds: 10 }), null);
+
+  const tracks = sampleVelocityCircles([valid, malformed], {
+    elapsedSeconds: 10,
+    sampleCount: 3,
+    trailSampleCount: 1,
+  });
+
+  assert.deepEqual(tracks.map((track) => track.id), ['valid']);
 });

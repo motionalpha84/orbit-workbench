@@ -6,10 +6,6 @@ import {
 
 const DEFAULT_SAMPLE_COUNT = 180;
 const DEFAULT_TRAIL_SAMPLE_COUNT = 24;
-const MIN_SAMPLE_COUNT = 12;
-const MAX_SAMPLE_COUNT = 720;
-const MIN_TRAIL_SAMPLE_COUNT = 2;
-const MAX_TRAIL_SAMPLE_COUNT = 96;
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -43,15 +39,15 @@ export function velocityTrailSpanSeconds(orbit) {
 }
 
 function normalizeSampleCount(sampleCount) {
-  return clamp(Math.floor(finiteNumber(sampleCount, DEFAULT_SAMPLE_COUNT)), MIN_SAMPLE_COUNT, MAX_SAMPLE_COUNT);
+  const count = Math.floor(finiteNumber(sampleCount, DEFAULT_SAMPLE_COUNT));
+  if (count <= 0) return DEFAULT_SAMPLE_COUNT;
+  return count;
 }
 
 function normalizeTrailSampleCount(sampleCount) {
-  return clamp(
-    Math.floor(finiteNumber(sampleCount, DEFAULT_TRAIL_SAMPLE_COUNT)),
-    MIN_TRAIL_SAMPLE_COUNT,
-    MAX_TRAIL_SAMPLE_COUNT,
-  );
+  const count = Math.floor(finiteNumber(sampleCount, DEFAULT_TRAIL_SAMPLE_COUNT));
+  if (count <= 0) return DEFAULT_TRAIL_SAMPLE_COUNT;
+  return count;
 }
 
 function velocityPoint(orbit, elapsedSeconds, perturbationModel) {
@@ -66,7 +62,20 @@ function velocityPoint(orbit, elapsedSeconds, perturbationModel) {
 }
 
 function hasOrbit(record) {
-  return Boolean(record?.orbit && Number.isFinite(Number(record.orbit.periodSeconds)));
+  const orbit = record?.orbit;
+  const elements = orbit?.elements;
+  return Boolean(
+    orbit
+      && elements
+      && Number.isFinite(Number(orbit.periodSeconds))
+      && Number.isFinite(Number(orbit.meanMotionRadS))
+      && Number.isFinite(Number(orbit.initialMeanAnomalyRad))
+      && Number.isFinite(Number(elements.semiMajorAxisKm))
+      && Number.isFinite(Number(elements.eccentricity))
+      && Number.isFinite(Number(elements.inclinationRad))
+      && Number.isFinite(Number(elements.raanRad))
+      && Number.isFinite(Number(elements.argPeriapsisRad)),
+  );
 }
 
 export function sampleVelocityCircle({

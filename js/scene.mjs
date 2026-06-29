@@ -26,6 +26,34 @@ function vectorToScene(positionKm) {
   );
 }
 
+function isFiniteVector(vector = {}) {
+  return Number.isFinite(Number(vector.x))
+    && Number.isFinite(Number(vector.y))
+    && Number.isFinite(Number(vector.z));
+}
+
+export function normalizeCalibrationMarkers(markers = []) {
+  if (!Array.isArray(markers)) return [];
+  return markers
+    .filter((marker) => marker?.orbitId && isFiniteVector(marker.positionKm))
+    .map((marker) => {
+      const positionKm = {
+        x: Number(marker.positionKm.x),
+        y: Number(marker.positionKm.y),
+        z: Number(marker.positionKm.z),
+      };
+      return {
+        orbitId: marker.orbitId,
+        orbitName: marker.orbitName || '未命名轨道',
+        color: marker.color || '#8bbfba',
+        positionKm,
+        scenePosition: vectorToScene(positionKm),
+        residual: Number.isFinite(Number(marker.residual)) ? Number(marker.residual) : 0,
+        elapsedSeconds: Number.isFinite(Number(marker.elapsedSeconds)) ? Number(marker.elapsedSeconds) : 0,
+      };
+    });
+}
+
 function makeTextSprite(text, color = '#c8f7ff') {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
@@ -459,7 +487,9 @@ export class OrbitScene {
     this.pointer = new THREE.Vector2();
 
     this.root = new THREE.Group();
+    this.calibrationMarkerGroup = new THREE.Group();
     this.scene.add(this.root);
+    this.root.add(this.calibrationMarkerGroup);
     this.scene.add(createStarField());
 
     this.createLighting();
@@ -834,6 +864,56 @@ export class OrbitScene {
     const state = propagateOrbit(orbitRecord.orbit, elapsedSeconds, { perturbationModel: this.perturbationModel });
     const current = vectorToScene(state.positionKm);
     group.marker.position.copy(current);
+  }
+
+  clearCalibrationMarkers() {
+    for (const child of [...this.calibrationMarkerGroup.children]) {
+      this.calibrationMarkerGroup.remove(child);
+      disposeObject(child);
+    }
+  }
+
+  createCalibrationMarker(marker) {
+    const group = new THREE.Group();
+    group.position.copy(marker.scenePosition);
+    group.userData.calibrationMarker = marker;
+
+    const color = colorFromHex(marker.color);
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.034, 28, 18),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 1.5,
+        transparent: true,
+        opacity: 0.96,
+        roughness: 0.28,
+      }),
+    );
+    group.add(core);
+
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(0.058, 0.0045, 8, 48),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    halo.rotation.x = Math.PI / 2;
+    group.add(halo);
+
+    return group;
+  }
+
+  setCalibrationMarkers(markers = []) {
+    this.clearCalibrationMarkers();
+    for (const marker of normalizeCalibrationMarkers(markers)) {
+      this.calibrationMarkerGroup.add(this.createCalibrationMarker(marker));
+    }
+    this.render();
   }
 
   resize() {

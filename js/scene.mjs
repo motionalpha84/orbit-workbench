@@ -53,6 +53,7 @@ export function normalizeCalibrationMarkers(markers = []) {
         scenePosition: vectorToScene(positionKm),
         residual: Number.isFinite(Number(marker.residual)) ? Number(marker.residual) : 0,
         elapsedSeconds: Number.isFinite(Number(marker.elapsedSeconds)) ? Number(marker.elapsedSeconds) : 0,
+        visible: marker.visible !== false,
       };
     });
 }
@@ -879,6 +880,7 @@ export class OrbitScene {
   createCalibrationMarker(marker) {
     const group = new THREE.Group();
     group.position.copy(marker.scenePosition);
+    group.visible = marker.visible !== false;
     group.userData.calibrationMarker = marker;
 
     const color = colorFromHex(marker.color);

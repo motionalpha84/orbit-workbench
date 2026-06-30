@@ -18,6 +18,7 @@ test('normalizes finite calibration marker data', () => {
       positionKm: { x: 7000, y: 10, z: -20 },
       residual: 0.001,
       elapsedSeconds: 120,
+      visible: false,
     },
     {
       orbitId: 'bad',
@@ -30,6 +31,7 @@ test('normalizes finite calibration marker data', () => {
   assert.equal(markers[0].targetId, 'target-1');
   assert.equal(markers[0].targetName, '近地点速度');
   assert.equal(markers[0].targetMode, 'velocity');
+  assert.equal(markers[0].visible, false);
   assert.deepEqual(markers[0].scenePosition, vectorToScene({ x: 7000, y: 10, z: -20 }));
 });
 
@@ -57,4 +59,5 @@ test('normalizes missing marker target labels', () => {
   assert.equal(markers[0].targetId, '');
   assert.equal(markers[0].targetName, '未命名标定');
   assert.equal(markers[0].targetMode, 'position');
+  assert.equal(markers[0].visible, true);
 });

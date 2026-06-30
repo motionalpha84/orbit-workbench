@@ -50,6 +50,15 @@ test('right sidebar module architecture is present', async () => {
   assert.match(html, /data-module-pin="assets"/, 'assets should have a pin button');
   assert.match(html, /data-module-pin="settings"/, 'settings should have a pin button');
   assert.match(html, /class="button-icon pin-icon"/, 'pin buttons should use the optimized pin icon');
+  const settingsNavSource = html.match(/<button class="module-nav-button" type="button" data-module-nav="settings"[\s\S]*?<\/button>/)?.[0] ?? '';
+  assert.ok(settingsNavSource, 'settings sidebar nav button should be discoverable');
+  assert.match(settingsNavSource, /class="module-nav-icon settings-gear-icon"/, 'settings nav should use the themed gear icon class');
+  assert.match(settingsNavSource, /class="gear-teeth" d="M9\.1 5L10\.1 2\.3L13\.9 2\.3L14\.9 5/, 'settings nav should render a centered toothed gear outline');
+  assert.match(settingsNavSource, /<circle class="gear-hub" cx="12" cy="12" r="3\.1"><\/circle>/, 'settings nav should include a clear central hub');
+  assert.doesNotMatch(settingsNavSource, /class="gear-spokes"/, 'settings nav should not include internal spokes');
+  assert.doesNotMatch(settingsNavSource, /class="gear-ring"/, 'settings nav should not include an inner ring');
+  assert.doesNotMatch(settingsNavSource, /M12\.22 2h-\.44/, 'settings nav should not use the light generic gear path');
+  assert.doesNotMatch(settingsNavSource, /M19\.4 15a8\.4/, 'settings nav should not use the old filled gear outline');
   assert.doesNotMatch(html, /id="ground-track-toggle"/, 'bottom ground-track button should be removed');
   assert.doesNotMatch(html, /workbench-hover-zone/, 'old hover strip should be removed');
 
@@ -74,6 +83,8 @@ test('right sidebar module architecture is present', async () => {
   assert.match(css, /\.simulation-time-panel:hover[\s\S]*?border-color:\s*rgba\(86,\s*140,\s*135,\s*0\.86\)/, 'simulation time readout should highlight like status cards on hover');
   assert.match(css, /\.pin-button \.pin-icon\s*\{[\s\S]*?transform:\s*rotate\(-18deg\)/, 'pin buttons should angle the optimized pin icon when not pinned');
   assert.match(css, /\.pin-button(?:\.is-pinned|\[aria-pressed="true"\]) \.pin-icon\s*\{[\s\S]*?transform:\s*rotate\(0deg\)/, 'pinned windows should show a straight active pin icon');
+  assert.match(css, /\.module-nav-icon path,\s*\.module-nav-icon circle\s*\{[\s\S]*?fill:\s*none[\s\S]*?stroke:\s*currentColor/, 'module nav icons should style path and circle strokes consistently');
+  assert.doesNotMatch(css, /\.settings-gear-icon \.gear-spokes/, 'settings gear should not carry spoke-specific styling');
 
   assert.match(app, /modulePins/, 'app should remember module pin state');
   assert.match(app, /startModulePreview/, 'app should support delayed hover preview');

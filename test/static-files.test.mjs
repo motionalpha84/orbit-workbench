@@ -89,6 +89,7 @@ test('workbench, assets, settings, and ground-track controls match the new contr
   const view = await readFile('js/groundtrack-view.mjs', 'utf8');
 
   assert.match(html, /仿真起始 UTC 时间/, 'workbench should start with UTC simulation time');
+  assert.match(html, /id="speed-factor"[\s\S]*value="86400">86400X \(1day\/s\)/, 'speed factor should include a one-day-per-second option');
   assert.match(html, /辅助设置/, 'scene controls should be renamed');
   assert.match(html, /id="toggle-graticule"/, '3D earth graticule toggle should exist');
   assert.match(html, /坐标轴/, 'axes toggle should exist');
@@ -175,12 +176,18 @@ test('vector calibration static UI contract is present', async () => {
 
   assert.equal(await fileExists('js/vector-calibration.mjs'), true, 'vector calibration solver should exist');
   assert.match(html, /<h3>其他功能<\/h3>/, 'workbench should expose an other-functions panel');
-  assert.match(html, /位置\/速度标定/, 'calibration tool title should exist');
+  assert.match(html, /位置矢量\/速度矢量标定/, 'calibration tool title should include vector wording');
+  assert.doesNotMatch(html, /位置\/速度标定/, 'calibration tool title should not use the shorter wording');
   assert.match(html, /id="calibration-target-list"/, 'calibration tool should expose a multi-target row list');
   assert.match(html, /id="calibration-add-target"/, 'calibration tool should allow adding named vectors');
   assert.match(html, /id="calibration-submit-all"/, 'calibration tool should run all vector targets');
   assert.match(html, /id="calibration-clear-results"/, 'calibration tool should clear results without deleting rows');
   assert.match(html, /id="calibration-results"/, 'calibration results container should exist');
+  assert.match(html, /id="calibration-target-editor"/, 'calibration tool should have a single target editor');
+  assert.match(html, /id="calibration-editor-error"/, 'calibration editor should expose validation errors');
+  assert.match(html, /添加至标定列表/, 'calibration primary button should add the draft target to the list');
+  assert.match(html, /id="calibration-cancel-edit"/, 'calibration editor should allow cancelling edits');
+  assert.match(html, /标定点列表/, 'calibration target list should have a list label');
   assert.match(html, /<span class="calibration-frame-label">ECI<\/span>/, 'calibration header should show only ECI');
   assert.doesNotMatch(html, /ECI · km \/ km\/s/, 'calibration header should not show units');
   assert.match(css, /\.calibration-target-list/, 'calibration target list should be styled');
@@ -193,15 +200,28 @@ test('vector calibration static UI contract is present', async () => {
   assert.match(css, /\.calibration-series-item/, 'calibration result series should reuse list item styling');
   assert.match(css, /\.calibration-series-detail/, 'expanded calibration details should be styled');
   assert.match(app, /calibrateOrbitVectorTargets/, 'app should import vector calibration batch solver');
-  assert.match(app, /calibrationTargets:\s*\[/, 'app should track multiple calibration targets');
+  assert.match(app, /calibrationTargets:\s*\[\]/, 'app should track committed calibration targets separately');
+  assert.match(app, /calibrationDraftTarget/, 'app should keep a separate calibration draft target');
+  assert.match(app, /calibrationEditingTargetId/, 'app should track which target is being edited');
   assert.match(app, /calibrationExpandedTargetIds/, 'app should track expanded calibration result series');
   assert.match(app, /hiddenCalibrationTargetIds/, 'app should track hidden calibration marker series');
+  assert.match(app, /renderCalibrationEditor/, 'app should render a single draft editor');
   assert.match(app, /renderCalibrationTargets/, 'app should render target rows');
+  assert.match(app, />位置矢量<\/option>/, 'position mode option should use vector wording');
+  assert.match(app, />速度矢量<\/option>/, 'velocity mode option should use vector wording');
+  assert.match(app, /velocity'\s*\?\s*'速度矢量标定'\s*:\s*'位置矢量标定'/, 'calibration mode labels should use vector wording');
   assert.match(app, /addCalibrationTarget/, 'app should add calibration target rows');
-  assert.match(app, /removeCalibrationTarget/, 'app should remove calibration target rows');
+  assert.match(app, /addOrSaveCalibrationTarget/, 'app should add or save a draft calibration target');
+  assert.match(app, /editCalibrationTarget/, 'app should edit calibration targets from the list');
+  assert.match(app, /deleteCalibrationTarget/, 'app should delete calibration targets from the list');
   assert.match(app, /toggleCalibrationResultExpansion/, 'app should toggle calibration result details');
   assert.match(app, /toggleCalibrationTargetVisibility/, 'app should toggle marker visibility by target');
   assert.match(app, /visible:\s*!state\.hiddenCalibrationTargetIds\.has/, 'app should mark hidden target markers invisible');
+  const calibrationSeriesItemSource = app.match(/function calibrationSeriesItemHtml\(target\) \{[\s\S]*?\n\}\n\nfunction renderCalibrationTargets/)?.[0] ?? '';
+  assert.ok(calibrationSeriesItemSource, 'calibration list item renderer should be discoverable');
+  assert.doesNotMatch(calibrationSeriesItemSource, /color-dot/, 'calibration list items should not render color dots');
+  assert.match(calibrationSeriesItemSource, /calibrationModeLabel\(target\.mode\)\)\} · \$\{escapeHtml\(calibrationResultSummary\(targetResult\)\)\}/, 'calibration list summaries should show type directly followed by hit status');
+  assert.doesNotMatch(calibrationSeriesItemSource, /calibrationTargetVectorLabel\(target\)/, 'calibration list summaries should omit vector values between type and hit status');
   assert.match(app, /calibrationMarkersFromBatchResult/, 'app should flatten batch hits into scene markers');
   assert.match(app, /scene\.setCalibrationMarkers/, 'app should send hits to the 3D scene');
   assert.match(app, /clearVectorCalibration\(\)/, 'orbit lifecycle should clear stale calibration state');

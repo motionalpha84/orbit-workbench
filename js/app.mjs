@@ -24,7 +24,7 @@ import {
   updateGroundTrackHistory,
 } from './groundtrack-history.mjs';
 import { GroundTrackView, formatUtc } from './groundtrack-view.mjs';
-import { calibrateOrbitVectorTargets } from './vector-calibration.mjs';
+import { calibrateOrbitVectorTargets, parseCalibrationVector } from './vector-calibration.mjs';
 
 const STORAGE_KEY = 'eci-orbit-workbench:v1';
 const ASSET_LIBRARY_KEY = 'eci-orbit-workbench:asset-groups:v1';
@@ -68,8 +68,12 @@ const els = {
   timeReadoutPanel: document.querySelector('.simulation-time-panel'),
   timeReadout: document.querySelector('#time-readout'),
   screenshotButton: document.querySelector('#screenshot-button'),
+  calibrationTargetEditor: document.querySelector('#calibration-target-editor'),
+  calibrationEditorError: document.querySelector('#calibration-editor-error'),
   calibrationTargetList: document.querySelector('#calibration-target-list'),
+  calibrationTargetCount: document.querySelector('#calibration-target-count'),
   calibrationAddTarget: document.querySelector('#calibration-add-target'),
+  calibrationCancelEdit: document.querySelector('#calibration-cancel-edit'),
   calibrationSubmitAll: document.querySelector('#calibration-submit-all'),
   calibrationClearResults: document.querySelector('#calibration-clear-results'),
   calibrationResults: document.querySelector('#calibration-results'),
@@ -152,6 +156,26 @@ function createCalibrationTarget(overrides = {}) {
   };
 }
 
+function createCalibrationDraftTarget(overrides = {}) {
+  return {
+    name: overrides.name ?? '',
+    mode: overrides.mode === 'velocity' ? 'velocity' : 'position',
+    vector: {
+      x: overrides.vector?.x ?? '',
+      y: overrides.vector?.y ?? '',
+      z: overrides.vector?.z ?? '',
+    },
+  };
+}
+
+function cloneCalibrationTarget(target = {}) {
+  return createCalibrationDraftTarget({
+    name: target.name ?? '',
+    mode: target.mode,
+    vector: target.vector,
+  });
+}
+
 const state = {
   orbits: [],
   selectedIds: [],
@@ -201,7 +225,10 @@ const state = {
   groundTrackHistories: new Map(),
   groundTrackTracks: [],
   lastGroundTrackRenderMs: 0,
-  calibrationTargets: [createCalibrationTarget()],
+  calibrationDraftTarget: createCalibrationDraftTarget(),
+  calibrationEditingTargetId: null,
+  calibrationEditorError: '',
+  calibrationTargets: [],
   calibrationResult: null,
   calibrationExpandedTargetIds: new Set(),
   hiddenCalibrationTargetIds: new Set(),
@@ -903,7 +930,7 @@ function renderMetrics() {
 }
 
 function calibrationModeLabel(mode = 'position') {
-  return mode === 'velocity' ? '速度标定' : '位置标定';
+  return mode === 'velocity' ? '速度矢量标定' : '位置矢量标定';
 }
 
 function calibrationResidualUnit(mode = 'position') {
@@ -918,76 +945,161 @@ function findCalibrationTarget(targetId) {
   return state.calibrationTargets.find((target) => target.id === targetId) ?? null;
 }
 
-function updateCalibrationTarget(targetId, field, value) {
-  const target = findCalibrationTarget(targetId);
-  if (!target) return;
-  let shouldRenderTargets = false;
+function updateCalibrationDraftTarget(field, value) {
+  const draft = state.calibrationDraftTarget;
   if (field === 'name') {
-    target.name = value;
+    draft.name = value;
   } else if (field === 'mode') {
-    target.mode = value === 'velocity' ? 'velocity' : 'position';
-    shouldRenderTargets = true;
+    draft.mode = value === 'velocity' ? 'velocity' : 'position';
+    renderCalibrationEditor();
   } else if (field === 'x' || field === 'y' || field === 'z') {
-    target.vector[field] = value;
+    draft.vector[field] = value;
   }
+  if (state.calibrationEditorError) {
+    state.calibrationEditorError = '';
+    renderCalibrationEditorError();
+  }
+}
+
+function renderCalibrationEditorError() {
+  els.calibrationEditorError.textContent = state.calibrationEditorError;
+  els.calibrationEditorError.classList.toggle('is-visible', Boolean(state.calibrationEditorError));
+}
+
+function resetCalibrationDraft() {
+  state.calibrationDraftTarget = createCalibrationDraftTarget();
+  state.calibrationEditingTargetId = null;
+  state.calibrationEditorError = '';
+}
+
+function normalizeCalibrationDraftTarget() {
+  const draft = state.calibrationDraftTarget;
+  const name = String(draft.name ?? '').trim();
+  if (!name) throw new Error('请填写标定点名称。');
+  parseCalibrationVector(draft.vector);
+  return {
+    name,
+    mode: draft.mode === 'velocity' ? 'velocity' : 'position',
+    vector: {
+      x: draft.vector.x,
+      y: draft.vector.y,
+      z: draft.vector.z,
+    },
+  };
+}
+
+function clearSolvedCalibrationState() {
   state.calibrationResult = null;
+  state.calibrationExpandedTargetIds.clear();
   scene.setCalibrationMarkers([]);
-  if (shouldRenderTargets) renderCalibrationTargets();
+}
+
+function addOrSaveCalibrationTarget() {
+  let normalized;
+  try {
+    normalized = normalizeCalibrationDraftTarget();
+  } catch (error) {
+    state.calibrationEditorError = error.message || '标定点输入无效。';
+    renderCalibrationEditorError();
+    return;
+  }
+
+  if (state.calibrationEditingTargetId) {
+    state.calibrationTargets = state.calibrationTargets.map((target) => (
+      target.id === state.calibrationEditingTargetId
+        ? { ...target, ...normalized }
+        : target
+    ));
+  } else {
+    state.calibrationTargets.push(createCalibrationTarget(normalized));
+  }
+
+  clearSolvedCalibrationState();
+  resetCalibrationDraft();
+  renderCalibrationEditor();
+  renderCalibrationTargets();
   renderCalibrationResults();
 }
 
 function addCalibrationTarget() {
-  state.calibrationTargets.push(createCalibrationTarget());
-  state.calibrationResult = null;
-  scene.setCalibrationMarkers([]);
-  renderCalibrationTargets();
-  renderCalibrationResults();
+  addOrSaveCalibrationTarget();
 }
 
-function removeCalibrationTarget(targetId) {
+function editCalibrationTarget(targetId) {
+  const target = findCalibrationTarget(targetId);
+  if (!target) return;
+  state.calibrationDraftTarget = cloneCalibrationTarget(target);
+  state.calibrationEditingTargetId = targetId;
+  state.calibrationEditorError = '';
+  renderCalibrationEditor();
+}
+
+function cancelCalibrationTargetEdit() {
+  resetCalibrationDraft();
+  renderCalibrationEditor();
+}
+
+function deleteCalibrationTarget(targetId) {
   state.calibrationTargets = state.calibrationTargets.filter((target) => target.id !== targetId);
-  if (state.calibrationTargets.length === 0) state.calibrationTargets.push(createCalibrationTarget());
   state.calibrationExpandedTargetIds.delete(targetId);
   state.hiddenCalibrationTargetIds.delete(targetId);
-  state.calibrationResult = null;
-  scene.setCalibrationMarkers([]);
+  if (state.calibrationEditingTargetId === targetId) resetCalibrationDraft();
+  if (state.calibrationResult?.targets) {
+    const targets = state.calibrationResult.targets.filter((targetResult) => targetResult.targetId !== targetId);
+    state.calibrationResult = {
+      ...state.calibrationResult,
+      status: targets.length > 0 ? state.calibrationResult.status : 'no-valid-targets',
+      targets,
+      hits: state.calibrationResult.hits.filter((hit) => hit.targetId !== targetId),
+    };
+  }
+  refreshCalibrationMarkers();
+  renderCalibrationEditor();
   renderCalibrationTargets();
   renderCalibrationResults();
 }
 
-function renderCalibrationTargets() {
-  els.calibrationTargetList.innerHTML = state.calibrationTargets.map((target) => `
-    <article class="calibration-target-row" data-calibration-target-id="${escapeHtml(target.id)}">
+function renderCalibrationEditor() {
+  const target = state.calibrationDraftTarget;
+  const isEditing = Boolean(state.calibrationEditingTargetId);
+  els.calibrationAddTarget.textContent = isEditing ? '保存修改' : '添加至标定列表';
+  els.calibrationCancelEdit.hidden = !isEditing;
+  els.calibrationTargetEditor.innerHTML = `
+    <article class="calibration-target-row calibration-editor-row">
       <div class="calibration-target-fields">
         <div class="calibration-target-topline">
           <label>
             <span>名称</span>
-            <input type="text" value="${escapeHtml(target.name)}" data-calibration-target-field="name" autocomplete="off" />
+            <input type="text" value="${escapeHtml(target.name)}" data-calibration-draft-field="name" autocomplete="off" />
           </label>
           <label>
             <span>类型</span>
-            <select data-calibration-target-field="mode">
-              <option value="position"${target.mode === 'position' ? ' selected' : ''}>位置</option>
-              <option value="velocity"${target.mode === 'velocity' ? ' selected' : ''}>速度</option>
+            <select data-calibration-draft-field="mode">
+              <option value="position"${target.mode === 'position' ? ' selected' : ''}>位置矢量</option>
+              <option value="velocity"${target.mode === 'velocity' ? ' selected' : ''}>速度矢量</option>
             </select>
           </label>
         </div>
         ${['x', 'y', 'z'].map((axis) => `
           <label class="calibration-vector-line">
             <span class="calibration-vector-axis">${axis}</span>
-            <input type="number" step="any" inputmode="decimal" value="${escapeHtml(target.vector[axis])}" data-calibration-target-field="${axis}" autocomplete="off" />
+            <input type="number" step="any" inputmode="decimal" value="${escapeHtml(target.vector[axis])}" data-calibration-draft-field="${axis}" autocomplete="off" />
             <span class="calibration-vector-unit">${calibrationVectorUnit(target.mode)}</span>
           </label>
         `).join('')}
       </div>
-      <button class="calibration-target-remove" type="button" data-calibration-remove-target="${escapeHtml(target.id)}" aria-label="删除 ${escapeHtml(target.name)}">×</button>
     </article>
-  `).join('');
+  `;
+  renderCalibrationEditorError();
 }
 
 function formatCalibrationVector(vector, digits = 4) {
   if (!vector) return '--';
   return `(${formatNumber(vector.x, digits)}, ${formatNumber(vector.y, digits)}, ${formatNumber(vector.z, digits)})`;
+}
+
+function calibrationTargetVectorLabel(target) {
+  return `${formatCalibrationVector(target.vector, target.mode === 'velocity' ? 6 : 3)} ${calibrationVectorUnit(target.mode)}`;
 }
 
 function calibrationResultItemHtml(item, mode, nearest = false) {
@@ -1006,6 +1118,7 @@ function calibrationResultItemHtml(item, mode, nearest = false) {
 }
 
 function calibrationResultSummary(targetResult) {
+  if (!targetResult) return '待标定';
   const result = targetResult.result;
   if (result.status === 'input-error') return result.error;
   if (result.status === 'no-visible-orbits') return '暂无可标定轨道';
@@ -1014,13 +1127,14 @@ function calibrationResultSummary(targetResult) {
   return `命中 ${result.hits.length} 个点`;
 }
 
-function calibrationSeriesColor(targetResult) {
-  return targetResult.result.hits[0]?.color
-    ?? targetResult.result.nearest?.color
-    ?? '#8bbfba';
+function calibrationTargetResult(targetId) {
+  return state.calibrationResult?.targets?.find((targetResult) => targetResult.targetId === targetId) ?? null;
 }
 
-function calibrationSeriesDetailHtml(targetResult) {
+function calibrationSeriesDetailHtml(target, targetResult) {
+  if (!targetResult) {
+    return `<div class="calibration-target-vector">目标矢量：${escapeHtml(calibrationTargetVectorLabel(target))}</div>`;
+  }
   const result = targetResult.result;
   const targetVector = result.targetVector;
   const vectorLabel = targetVector
@@ -1057,46 +1171,60 @@ function calibrationSeriesDetailHtml(targetResult) {
   `;
 }
 
-function calibrationSeriesItemHtml(targetResult) {
-  const targetId = targetResult.targetId;
-  const result = targetResult.result;
+function calibrationSeriesItemHtml(target) {
+  const targetId = target.id;
+  const targetResult = calibrationTargetResult(targetId);
+  const result = targetResult?.result ?? null;
   const isExpanded = state.calibrationExpandedTargetIds.has(targetId);
   const isHidden = state.hiddenCalibrationTargetIds.has(targetId);
-  const hasMarkers = result.hits.length > 0;
-  const tone = result.status === 'input-error'
+  const tone = result?.status === 'input-error'
     ? ' is-error'
-    : result.hits.length === 0
+    : result && result.hits.length === 0
       ? ' is-empty'
       : '';
 
   return `
     <article class="calibration-series-item${isExpanded ? ' is-open' : ''}${isHidden ? ' is-hidden' : ''}${tone}" data-calibration-result-target="${escapeHtml(targetId)}">
-      <span class="color-dot" style="background-color: ${escapeHtml(calibrationSeriesColor(targetResult))}"></span>
       <button class="calibration-series-main" type="button" data-calibration-toggle-result="${escapeHtml(targetId)}" aria-expanded="${isExpanded ? 'true' : 'false'}">
-        <strong>${escapeHtml(targetResult.targetName)}</strong>
-        <span>${escapeHtml(calibrationModeLabel(targetResult.mode))} · ${escapeHtml(calibrationResultSummary(targetResult))}</span>
+        <strong>${escapeHtml(target.name)}</strong>
+        <span>${escapeHtml(calibrationModeLabel(target.mode))} · ${escapeHtml(calibrationResultSummary(targetResult))}</span>
       </button>
       <div class="calibration-series-actions">
-        <button class="mini-button" type="button" data-calibration-target-visibility="${escapeHtml(targetId)}" title="${isHidden ? '显示该系列标定点' : '隐藏该系列标定点'}" aria-pressed="${isHidden ? 'true' : 'false'}"${hasMarkers ? '' : ' disabled'}>${isHidden ? '○' : '●'}</button>
+        <button class="mini-button" type="button" data-calibration-target-visibility="${escapeHtml(targetId)}" title="${isHidden ? '显示该系列标定点' : '隐藏该系列标定点'}" aria-pressed="${isHidden ? 'true' : 'false'}">${isHidden ? '○' : '●'}</button>
+        <button class="mini-button" type="button" data-calibration-edit-target="${escapeHtml(targetId)}" title="编辑标定点">✎</button>
+        <button class="mini-button" type="button" data-calibration-delete-target="${escapeHtml(targetId)}" title="删除标定点">×</button>
       </div>
-      ${isExpanded ? `<div class="calibration-series-detail">${calibrationSeriesDetailHtml(targetResult)}</div>` : ''}
+      ${isExpanded ? `<div class="calibration-series-detail">${calibrationSeriesDetailHtml(target, targetResult)}</div>` : ''}
     </article>
   `;
 }
 
+function renderCalibrationTargets() {
+  els.calibrationTargetCount.textContent = `${state.calibrationTargets.length} 条`;
+  if (state.calibrationTargets.length === 0) {
+    els.calibrationTargetList.innerHTML = '<div class="empty-list">当前没有标定点。填写上方输入后添加至列表。</div>';
+    return;
+  }
+  els.calibrationTargetList.innerHTML = `<div class="calibration-series-list">${state.calibrationTargets.map((target) => calibrationSeriesItemHtml(target)).join('')}</div>`;
+}
+
 function renderCalibrationResults() {
   const result = state.calibrationResult;
+  if (state.calibrationTargets.length === 0) {
+    els.calibrationResults.textContent = '添加标定点后点击标定全部。';
+    return;
+  }
   if (!result) {
-    els.calibrationResults.textContent = '添加 ECI 矢量后点击标定全部。';
+    els.calibrationResults.textContent = `列表中 ${state.calibrationTargets.length} 个标定点，点击标定全部。`;
     return;
   }
 
   if (result.status === 'no-valid-targets' && result.targets.length === 0) {
-    els.calibrationResults.innerHTML = '<div class="empty-list">暂无可标定矢量。</div>';
+    els.calibrationResults.textContent = '暂无可标定矢量。';
     return;
   }
 
-  els.calibrationResults.innerHTML = `<div class="calibration-series-list">${result.targets.map((targetResult) => calibrationSeriesItemHtml(targetResult)).join('')}</div>`;
+  els.calibrationResults.textContent = `标定完成：命中 ${result.hits.length} 个点。`;
 }
 
 function refreshCalibrationMarkers() {
@@ -1109,7 +1237,7 @@ function toggleCalibrationResultExpansion(targetId) {
   } else {
     state.calibrationExpandedTargetIds.add(targetId);
   }
-  renderCalibrationResults();
+  renderCalibrationTargets();
 }
 
 function toggleCalibrationTargetVisibility(targetId) {
@@ -1119,7 +1247,7 @@ function toggleCalibrationTargetVisibility(targetId) {
     state.hiddenCalibrationTargetIds.add(targetId);
   }
   refreshCalibrationMarkers();
-  renderCalibrationResults();
+  renderCalibrationTargets();
 }
 
 function calibrationMarkersFromBatchResult(result) {
@@ -1151,6 +1279,7 @@ function runVectorCalibration() {
     sampleCount: budget.max3dReferenceSamples,
   });
   refreshCalibrationMarkers();
+  renderCalibrationTargets();
   renderCalibrationResults();
 }
 
@@ -1159,6 +1288,7 @@ function clearVectorCalibration() {
   state.calibrationExpandedTargetIds.clear();
   state.hiddenCalibrationTargetIds.clear();
   scene.setCalibrationMarkers([]);
+  renderCalibrationTargets();
   renderCalibrationResults();
 }
 
@@ -1783,6 +1913,7 @@ function renderUi() {
   renderOrbitList();
   renderStatusOrbitMenu();
   renderMetrics();
+  renderCalibrationEditor();
   renderCalibrationTargets();
   renderCalibrationResults();
   syncOverlayControlsFromState();
@@ -1916,31 +2047,37 @@ function bindEvents() {
     button.addEventListener('click', () => toggleModulePin(button.dataset.modulePin));
   }
 
-  els.calibrationAddTarget.addEventListener('click', addCalibrationTarget);
+  els.calibrationAddTarget.addEventListener('click', addOrSaveCalibrationTarget);
+  els.calibrationCancelEdit.addEventListener('click', cancelCalibrationTargetEdit);
   els.calibrationSubmitAll.addEventListener('click', runVectorCalibration);
   els.calibrationClearResults.addEventListener('click', clearVectorCalibration);
-  els.calibrationTargetList.addEventListener('input', (event) => {
-    const field = event.target?.dataset?.calibrationTargetField;
-    const row = event.target?.closest?.('[data-calibration-target-id]');
-    if (!field || !row) return;
-    updateCalibrationTarget(row.dataset.calibrationTargetId, field, event.target.value);
+  els.calibrationTargetEditor.addEventListener('input', (event) => {
+    const field = event.target?.dataset?.calibrationDraftField;
+    if (!field) return;
+    updateCalibrationDraftTarget(field, event.target.value);
   });
-  els.calibrationTargetList.addEventListener('change', (event) => {
-    const field = event.target?.dataset?.calibrationTargetField;
-    const row = event.target?.closest?.('[data-calibration-target-id]');
-    if (!field || !row) return;
-    updateCalibrationTarget(row.dataset.calibrationTargetId, field, event.target.value);
+  els.calibrationTargetEditor.addEventListener('change', (event) => {
+    const field = event.target?.dataset?.calibrationDraftField;
+    if (!field) return;
+    updateCalibrationDraftTarget(field, event.target.value);
   });
   els.calibrationTargetList.addEventListener('click', (event) => {
-    const button = event.target?.closest?.('[data-calibration-remove-target]');
-    if (!button) return;
-    removeCalibrationTarget(button.dataset.calibrationRemoveTarget);
-  });
-  els.calibrationResults.addEventListener('click', (event) => {
     const visibilityButton = event.target?.closest?.('[data-calibration-target-visibility]');
     if (visibilityButton) {
       event.stopPropagation();
-      if (!visibilityButton.disabled) toggleCalibrationTargetVisibility(visibilityButton.dataset.calibrationTargetVisibility);
+      toggleCalibrationTargetVisibility(visibilityButton.dataset.calibrationTargetVisibility);
+      return;
+    }
+    const editButton = event.target?.closest?.('[data-calibration-edit-target]');
+    if (editButton) {
+      event.stopPropagation();
+      editCalibrationTarget(editButton.dataset.calibrationEditTarget);
+      return;
+    }
+    const deleteButton = event.target?.closest?.('[data-calibration-delete-target]');
+    if (deleteButton) {
+      event.stopPropagation();
+      deleteCalibrationTarget(deleteButton.dataset.calibrationDeleteTarget);
       return;
     }
     const toggleButton = event.target?.closest?.('[data-calibration-toggle-result]');

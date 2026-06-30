@@ -1455,6 +1455,11 @@ select {
   gap: 8px;
 }
 
+.calibration-target-editor {
+  display: grid;
+  gap: 8px;
+}
+
 .calibration-target-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px;
@@ -1464,6 +1469,10 @@ select {
   border-radius: 6px;
   padding: 8px;
   background: rgba(5, 14, 20, 0.34);
+}
+
+.calibration-editor-row {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .calibration-target-fields {
@@ -1546,10 +1555,45 @@ select {
   border-color: rgba(242, 121, 121, 0.44);
 }
 
+.calibration-editor-error {
+  display: none;
+  border: 1px solid rgba(242, 121, 121, 0.32);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #ffb4b4;
+  background: rgba(88, 20, 24, 0.2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.calibration-editor-error.is-visible {
+  display: block;
+}
+
 .calibration-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.calibration-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.calibration-list-header span {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.calibration-list-header strong {
+  color: var(--subtle);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .calibration-results {
@@ -1571,7 +1615,7 @@ select {
 
 .calibration-series-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   border: 1px solid var(--line);
@@ -1718,7 +1762,7 @@ select {
   }
 
   .calibration-series-item {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 

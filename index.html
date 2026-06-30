@@ -103,6 +103,7 @@
                   <option value="600">600x</option>
                   <option value="3600">3600x (1hr/s)</option>
                   <option value="6000">6000x</option>
+                  <option value="86400">86400X (1day/s)</option>
                 </select>
               </label>
               <div class="playback-row icon-playback-row">
@@ -390,17 +391,24 @@
             <h3>其他功能</h3>
             <span>轨道分析</span>
           </div>
-          <div class="calibration-tool" aria-label="位置/速度标定">
+          <div class="calibration-tool" aria-label="位置矢量/速度矢量标定">
             <div class="calibration-tool-header">
-              <h4>位置/速度标定</h4>
+              <h4>位置矢量/速度矢量标定</h4>
               <span class="calibration-frame-label">ECI</span>
             </div>
-            <div id="calibration-target-list" class="calibration-target-list" aria-label="标定矢量列表"></div>
+            <div id="calibration-target-editor" class="calibration-target-editor" aria-label="标定点输入"></div>
+            <div id="calibration-editor-error" class="calibration-editor-error" aria-live="polite"></div>
             <div class="calibration-actions">
-              <button id="calibration-add-target" class="secondary-action" type="button">添加矢量</button>
+              <button id="calibration-add-target" class="secondary-action" type="button">添加至标定列表</button>
+              <button id="calibration-cancel-edit" class="secondary-action" type="button" hidden>取消编辑</button>
               <button id="calibration-submit-all" class="primary-action" type="button">标定全部</button>
               <button id="calibration-clear-results" class="secondary-action" type="button">清除结果</button>
             </div>
+            <div class="calibration-list-header">
+              <span>标定点列表</span>
+              <strong id="calibration-target-count">0 条</strong>
+            </div>
+            <div id="calibration-target-list" class="calibration-target-list" aria-label="标定点列表"></div>
             <div id="calibration-results" class="calibration-results" aria-live="polite">添加 ECI 矢量后点击标定全部。</div>
           </div>
         </section>

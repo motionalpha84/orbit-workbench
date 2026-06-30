@@ -217,7 +217,7 @@ test('vector calibration static UI contract is present', async () => {
   assert.match(app, /toggleCalibrationResultExpansion/, 'app should toggle calibration result details');
   assert.match(app, /toggleCalibrationTargetVisibility/, 'app should toggle marker visibility by target');
   assert.match(app, /visible:\s*!state\.hiddenCalibrationTargetIds\.has/, 'app should mark hidden target markers invisible');
-  const calibrationSeriesItemSource = app.match(/function calibrationSeriesItemHtml\(target\) \{[\s\S]*?\n\}\n\nfunction renderCalibrationTargets/)?.[0] ?? '';
+  const calibrationSeriesItemSource = app.match(/function calibrationSeriesItemHtml\(target\) \{[\s\S]*?\r?\n\}\r?\n\r?\nfunction renderCalibrationTargets/)?.[0] ?? '';
   assert.ok(calibrationSeriesItemSource, 'calibration list item renderer should be discoverable');
   assert.doesNotMatch(calibrationSeriesItemSource, /color-dot/, 'calibration list items should not render color dots');
   assert.match(calibrationSeriesItemSource, /calibrationModeLabel\(target\.mode\)\)\} · \$\{escapeHtml\(calibrationResultSummary\(targetResult\)\)\}/, 'calibration list summaries should show type directly followed by hit status');

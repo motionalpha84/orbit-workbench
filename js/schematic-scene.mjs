@@ -7,6 +7,7 @@
 import { EARTH_RADIUS_KM } from './orbit.mjs';
 import { greenwichSiderealAngleAt } from './groundtrack.mjs';
 import { displayColorOnLight } from './color.mjs';
+import { trajectoryFrames, trajectoryPositionAt } from './trajectory.mjs';
 
 const RE = EARTH_RADIUS_KM;
 const TAU = Math.PI * 2;
@@ -150,6 +151,7 @@ function createData() {
     epochMs: Date.now(),
     elapsed: 0,
     markers: [],
+    trajectories: [],
     revision: 0,
   };
 }
@@ -172,12 +174,15 @@ export class SchematicScene {
     this.mouse = null;
     this.drag = null;
     this.hoverId = null;
+    this.hoverMarker = null;
+    this.hoverTrajectory = null;
     this.hoverCallback = null;
     this.clickCallback = null;
     this.plotStart = 0;
     this.plotDone = mini;
     this.screenPoints = new Map();
     this.refCache = new Map();
+    this.trajectoryCache = new WeakMap();
     this.lastRender = performance.now();
     this.plotterEl = mini ? null : document.getElementById('scene-plotter');
     this.scaleBarEl = mini ? null : document.getElementById('scene-scale-bar');
@@ -214,6 +219,11 @@ export class SchematicScene {
 
   setEpoch(utcMs) { if (Number.isFinite(utcMs)) this.data.epochMs = utcMs; }
 
+  // imported position-vector trajectories ({ id, name, color, visible, frame, timeOrigin, dense })
+  setTrajectories(trajectories = []) {
+    this.data.trajectories = Array.isArray(trajectories) ? trajectories.filter((trajectory) => trajectory?.dense?.length > 1) : [];
+  }
+
   setCalibrationMarkers(markers = []) {
     this.data.markers = (Array.isArray(markers) ? markers : []).filter((marker) => finiteVector(marker?.positionKm));
   }
@@ -225,10 +235,23 @@ export class SchematicScene {
   setOrbitClickCallback(callback) { this.clickCallback = callback; }
 
   setView(view) {
-    const target = this.camTarget;
-    if (view === 'front') Object.assign(target, { yaw: 0, pitch: 0 });
-    else if (view === 'top') Object.assign(target, { yaw: 0, pitch: Math.PI / 2 - 0.001 });
-    else Object.assign(target, { yaw: CAM0.yaw, pitch: CAM0.pitch, zoom: this.mini ? MINI_ZOOM : CAM0.zoom });
+    if (view === 'front') this.easeTo({ yaw: 0, pitch: 0 });
+    else if (view === 'top') this.easeTo({ yaw: 0, pitch: Math.PI / 2 - 0.001 });
+    else this.easeTo({ yaw: CAM0.yaw, pitch: CAM0.pitch, zoom: this.mini ? MINI_ZOOM : CAM0.zoom });
+  }
+
+  /** Look straight down an orbit plane's normal h = (sin i sin Ω, −sin i cos Ω, cos i). The view
+      vector Dv = (−sin yaw cos pitch, −cos yaw cos pitch, sin pitch) equals h at pitch = 90° − i,
+      yaw = −Ω. ECEF draws the plane rotated by −θ, so Ω is taken relative to the current θ. */
+  setPlaneView(inclinationDeg, raanDeg) {
+    let raan = raanDeg * D2R;
+    if (this.data.frame === 'ECEF') raan -= greenwichSiderealAngleAt(this.data.epochMs, this.data.elapsed);
+    const limit = Math.PI / 2 - 0.001;
+    this.easeTo({ yaw: -raan, pitch: clamp(Math.PI / 2 - inclinationDeg * D2R, -limit, limit) });
+  }
+
+  easeTo(view) {
+    const target = Object.assign(this.camTarget, view);
     // ease the short way round
     const delta = ((target.yaw - this.cam.yaw) % TAU + TAU + Math.PI) % TAU - Math.PI;
     target.yaw = this.cam.yaw + delta;
@@ -284,7 +307,9 @@ export class SchematicScene {
       this.camTarget.pitch = this.cam.pitch;
     });
     const end = () => {
-      if (this.drag && this.drag.moved < 4 && this.hoverId && this.clickCallback) this.clickCallback(this.hoverId);
+      // a calibration hit selects the orbit it lies on
+      const id = this.hoverMarker ? this.hoverMarker.orbitId : this.hoverTrajectory ? null : this.hoverId;
+      if (this.drag && this.drag.moved < 4 && id && this.clickCallback) this.clickCallback(id);
       this.drag = null;
       canvas.classList.remove('drag');
     };
@@ -300,6 +325,8 @@ export class SchematicScene {
   setHover(id, payload = null) {
     const changed = id !== this.hoverId;
     this.hoverId = id;
+    this.hoverMarker = payload?.calibrationMarker ?? null;
+    this.hoverTrajectory = payload?.trajectory ?? null;
     if (this.canvas) this.canvas.style.cursor = id ? 'pointer' : '';
     if (!this.hoverCallback) return;
     if (id) this.hoverCallback(payload);
@@ -622,6 +649,38 @@ export class SchematicScene {
       }
     }
 
+    // imported trajectories: the smoothed curve in the display frame (each sample rotated at its
+    // own time), an open square at the first sample, and a dot + name while the simulation time
+    // lies inside the covered span (otherwise the name sits at the curve's end)
+    const trajectoryPoints = [];
+    if (!mini) {
+      for (const trajectory of data.trajectories) {
+        if (trajectory.visible === false) continue;
+        const frames = this.frameTrajectory(trajectory, data.epochMs);
+        const curve = ecef ? frames.ecef : frames.eci;
+        const pts = curve.map((p) => this.project(p));
+        trajectoryPoints.push([trajectory, pts]);
+        const color = displayColorOnLight(trajectory.color);
+        const hot = this.hoverTrajectory === trajectory;
+        ctx.lineJoin = 'round';
+        this.strokeRuns(ctx, pts, color, hot ? 2.6 : 1.8, 0.95, null, 0.2);
+        ctx.lineJoin = 'miter';
+        const first = pts[0];
+        ctx.globalAlpha = first[3] ? 0.35 : 1; ctx.strokeStyle = color; ctx.lineWidth = 1.4;
+        ctx.strokeRect(first[0] - 3.5, first[1] - 3.5, 7, 7);
+        const at = trajectoryPositionAt(frames.elapsed, curve, t);
+        const m = at ? this.project(at) : pts[pts.length - 1];
+        ctx.globalAlpha = m[3] ? 0.35 : 1;
+        ctx.beginPath(); ctx.arc(m[0], m[1], at ? 4.5 : 2.5, 0, TAU);
+        ctx.fillStyle = at ? color : INK; ctx.fill();
+        if (at) { ctx.strokeStyle = INK; ctx.lineWidth = 1.2; ctx.stroke(); }
+        ctx.globalAlpha = m[3] ? 0.45 : 1;
+        ctx.font = `700 10.5px ${FH}`; ctx.fillStyle = INK;
+        ctx.fillText(trajectory.name, m[0] + 8, m[1] - 8);
+        ctx.globalAlpha = 1;
+      }
+    }
+
     // orbits: dashed reference loop, fading trail, then markers + callouts on top
     const many = visible.length;
     const maxPoints = many <= 40 ? 180 : many <= 150 ? 72 : 28;
@@ -633,7 +692,7 @@ export class SchematicScene {
     visible.forEach((record, index) => {
       const color = displayColorOnLight(record.color);
       const selected = data.selected.has(record.id);
-      const hovered = !mini && this.hoverId === record.id;
+      const hovered = !mini && (this.hoverId === record.id || this.hoverMarker?.orbitId === record.id);
       const fade = P >= 1 ? 1 : EASE(clamp((P - 0.18 - index * 0.09) / 0.5, 0, 1));
       const ref = this.referencePoints(record, maxPoints).map((p) => this.project(fr(p)));
       this.screenPoints.set(record.id, ref);
@@ -706,23 +765,56 @@ export class SchematicScene {
       ctx.textAlign = 'left'; ctx.globalAlpha = 1;
     }
 
-    // calibration hits: hollow ring in the orbit colour around an ink dot
+    // calibration hits: hollow ring in the orbit colour around an ink dot, tagged with the target
+    // name on the diagonal opposite its orbit's callout (a hit often sits on the orbit's marker)
+    const markerPoints = [];
     if (!mini) {
-      for (const marker of data.markers) {
-        if (marker.visible === false) continue;
+      const shown = data.markers.filter((marker) => marker.visible !== false);
+      const named = shown.length <= 40;
+      const calloutIndex = new Map(labels.map((label) => [label.record.id, label.index]));
+      for (const marker of shown) {
         const p = vis(toArray(marker.positionKm));
         const markerTheta = theta - EARTH_RATE * (t - Number(marker.elapsedSeconds || 0));
         const q = this.project(ecef ? rotZ(p, -markerTheta) : p);
+        markerPoints.push([marker, q]);
+        const hot = this.hoverMarker === marker;
+        const color = displayColorOnLight(marker.color || '#3FB5A3');
         ctx.globalAlpha = q[3] ? 0.35 : 1;
-        ctx.strokeStyle = displayColorOnLight(marker.color || '#3FB5A3'); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(q[0], q[1], 7, 0, TAU); ctx.stroke();
+        if (hot) { ctx.fillStyle = '#8FE3D3'; ctx.globalAlpha *= 0.45; ctx.beginPath(); ctx.arc(q[0], q[1], 11, 0, TAU); ctx.fill(); ctx.globalAlpha = q[3] ? 0.35 : 1; }
+        ctx.strokeStyle = color; ctx.lineWidth = hot ? 2.6 : 2;
+        ctx.beginPath(); ctx.arc(q[0], q[1], hot ? 8 : 7, 0, TAU); ctx.stroke();
         ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(q[0], q[1], 2, 0, TAU); ctx.fill();
+        if (named || hot) {
+          const name = String(marker.targetName || '标定点');
+          const index = calloutIndex.get(marker.orbitId) ?? 1;
+          const dx = index % 2 ? 1 : -1; const dy = index % 4 > 1 ? -1 : 1;
+          ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.globalAlpha *= 0.75;
+          ctx.beginPath(); ctx.moveTo(q[0] + dx * 6, q[1] + dy * 6); ctx.lineTo(q[0] + dx * 12, q[1] + dy * 12); ctx.stroke();
+          ctx.globalAlpha = q[3] ? 0.45 : 1;
+          ctx.font = `700 10.5px ${FH}`;
+          const w = ctx.measureText(name).width + 10;
+          const bx = dx > 0 ? q[0] + 12 : q[0] - 12 - w; const ly = q[1] + dy * 12 + dy * 7;
+          ctx.fillStyle = hot ? '#8FE3D3' : 'rgba(255,255,255,.86)'; ctx.fillRect(bx, ly - 7.5, w, 15);
+          ctx.fillStyle = color; ctx.fillRect(dx > 0 ? bx : bx + w - 2, ly - 7.5, 2, 15);
+          ctx.fillStyle = INK; ctx.textBaseline = 'middle'; ctx.fillText(name, bx + 5, ly);
+          ctx.textBaseline = 'alphabetic';
+        }
         ctx.globalAlpha = 1;
       }
     }
 
-    // hover: nearest reference sample within 9 px
+    // hover: a calibration hit within 10 px wins, else the nearest reference sample within 9 px
     if (!mini && this.mouse && !this.drag) {
+      let hit = null; let hitDistance = 100;
+      for (const [marker, q] of markerPoints) {
+        const d = (q[0] - this.mouse.x) ** 2 + (q[1] - this.mouse.y) ** 2;
+        if (d < hitDistance) { hitDistance = d; hit = marker; }
+      }
+      if (hit) {
+        const index = data.markers.indexOf(hit);
+        this.setHover(`calibration:${index}`, { calibrationMarker: hit, clientX: this.mouse.clientX, clientY: this.mouse.clientY });
+        return;
+      }
       let best = null; let bestDistance = 81;
       for (const record of visible) {
         const pts = this.screenPoints.get(record.id);
@@ -732,7 +824,28 @@ export class SchematicScene {
           if (d < bestDistance) { bestDistance = d; best = record; }
         }
       }
-      this.setHover(best?.id ?? null, best ? { orbitRecord: best, clientX: this.mouse.clientX, clientY: this.mouse.clientY } : null);
+      if (best) {
+        this.setHover(best.id, { orbitRecord: best, clientX: this.mouse.clientX, clientY: this.mouse.clientY });
+        return;
+      }
+      let line = null; bestDistance = 64;
+      for (const [trajectory, pts] of trajectoryPoints) {
+        for (const q of pts) {
+          const d = (q[0] - this.mouse.x) ** 2 + (q[1] - this.mouse.y) ** 2;
+          if (d < bestDistance) { bestDistance = d; line = trajectory; }
+        }
+      }
+      this.setHover(line ? `trajectory:${line.id}` : null, line ? { trajectory: line, clientX: this.mouse.clientX, clientY: this.mouse.clientY } : null);
     }
+  }
+
+  // both display frames of a trajectory, radially scaled, cached until the simulation start moves
+  frameTrajectory(trajectory, epochMs) {
+    const cached = this.trajectoryCache.get(trajectory);
+    if (cached?.epochMs === epochMs) return cached;
+    const frames = trajectoryFrames(trajectory, epochMs);
+    const entry = { epochMs, elapsed: frames.elapsed, eci: frames.eci.map(vis), ecef: frames.ecef.map(vis) };
+    this.trajectoryCache.set(trajectory, entry);
+    return entry;
   }
 }

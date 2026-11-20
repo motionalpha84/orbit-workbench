@@ -4,6 +4,8 @@
 export const TITLE = { zh: '轨道仿真工作台 v0.2.0', en: 'Orbit Workbench v0.2.0' };
 
 export const DICT_ENTRIES = {
+  // assets · import window · help formats
+  '中心天体与动力学模型': 'Central body and dynamics model', '当前配置': 'Current', '展开选择中心天体': 'Open to choose the central body', '展开选择动力学模型': 'Open to choose the dynamics model', 'J2 / J3 摄动仅适用于地球。': 'J2 / J3 perturbations apply to Earth only.', '中心天体': 'Central body', '动力学模型': 'Dynamics model', '月球 · 二体': 'Moon · Two-body', '每行一条轨道：名称 a e i Ω ω ν，可选 # GROUP 组名': 'One orbit per line: name a e i Ω ω ν, optional # GROUP name', '同一行格式的轨道组文件，# GROUP 指定组名': 'Orbit-group file in the same line format, # GROUP names it', '轨道数组，必填；每项含名称、颜色、显隐与六要素': 'Orbit array, required; each item has name, colour, visibility and its six', '中心天体，当前为': 'Central body, currently', '导入工作环境 JSON': 'Import workspace JSON', '导入轨道 / 轨迹数据': 'Import orbit / trajectory data', '六要素 · 六要素组 · 位置矢量轨迹': 'Elements · element group · position trajectory', '导入轨道六要素': 'Import orbit elements', '名称行 + 五或六个根数值（逐行）': 'Name line + five or six element values (one per line)', '导入统一六要素组': 'Import element group', '每行一条轨道：名称 a e i Ω ω ν': 'One orbit per line: name a e i Ω ω ν', '导入轨迹': 'Import trajectory', '各时刻位置矢量：t x y z（可附 vx vy vz）': 'Position vector per epoch: t x y z (optionally vx vy vz)', '格式': 'Format', '查看格式示例': 'View format example', '已导入轨迹': 'Imported trajectories', '隐藏轨迹': 'Hide trajectory', '显示轨迹': 'Show trajectory', '删除轨迹': 'Delete trajectory', '导入确认': 'Confirm import', '取消导入': 'Cancel import', '文件内容': 'File contents', '轨迹预览（赤道面投影，平滑曲线）': 'Trajectory preview (equatorial projection, smoothed)', '轨道中心天体': 'Central body', '六要素须对应一个中心天体，请选择：': 'Orbit elements need a central body — choose one:', '月球': 'Moon', '火星': 'Mars', '太阳': 'Sun', 'MOON · 待后台接入': 'MOON · awaiting backend', 'MARS · 待后台接入': 'MARS · awaiting backend', 'SUN · 待后台接入': 'SUN · awaiting backend', '轨迹坐标系': 'Trajectory frame', '位置矢量所在的坐标系，请选择：': 'Frame of the position vectors — choose one:', '地心惯性系（J2000）': 'Earth-centred inertial (J2000)', '地心地固系（随地球自转）': 'Earth-centred, Earth-fixed (rotates with Earth)', '确认后按所选坐标系换算，并以平滑曲线绘制到工作台。': 'On confirm the samples are converted from this frame and drawn on the deck as a smooth curve.', '确认导入': 'Import', '请先选择坐标系': 'Choose a frame first', '请先选择中心天体': 'Choose a central body first', '轨道六要素': 'Orbit elements', '统一六要素组': 'Element group', '位置矢量轨迹': 'Position trajectory', '轨迹叠加显示在工作台，不替换现有轨道；本次会话内保留，刷新页面后需重新导入。': 'Trajectories overlay the deck without replacing orbits; they last for this session and must be re-imported after a reload.', '确认后载入为当前场景。': 'Confirming loads them as the current scene.', '该中心天体尚未接入后台计算。': 'This central body is not connected to the backend yet.', '坐标系': 'Frame', '采样点': 'Samples', '起始': 'Start', '时长': 'Span', '平滑': 'Smoothing', 'ECEF 地心地固系': 'ECEF Earth-fixed', 'ECI 地心惯性系': 'ECI inertial', 'Hermite（位置 + 速度）': 'Hermite (position + velocity)', 'Catmull-Rom（向心）': 'Catmull-Rom (centripetal)', '导入格式': 'Import formats', '工作环境 JSON': 'Workspace JSON', '轨迹': 'Trajectory', '下载此示例': 'Download this example', '第 1 行': 'Line 1', '第 2–7 行': 'Lines 2–7', '列 1': 'Column 1', '列 2–7': 'Columns 2–7', '列 2–4': 'Columns 2–4', '列 5–7': 'Columns 5–7', '轨道名称（不能是纯数字）': 'Orbit name (not a bare number)', 'a / km，e，i / °，Ω / °，ω / °，ν / °': 'a / km, e, i / °, Ω / °, ω / °, ν / °', 'a / km，e，i / °，Ω / °，ω / °，ν / °（ν 可省略）': 'a / km, e, i / °, Ω / °, ω / °, ν / ° (ν optional)', '时间：秒或 UTC': 'Time: seconds or UTC', '位置 x y z / km': 'Position x y z / km', '速度 vx vy vz / km/s（可选，整条轨迹统一）': 'Velocity vx vy vz / km/s (optional, all rows or none)',
   // shell · navigation
   '轨道仿真工作台': 'Orbit Workbench', '轨道仿真工作台 v0.2.0': 'Orbit Workbench v0.2.0', '轨道仿真工作台 v0.2.0 首页': 'Orbit Workbench v0.2.0 home',
   '界面语言': 'Interface language', '模块侧栏': 'Module sidebar', '工作台': 'Deck', '星下点': 'Track', '任务': 'Queue', '资产': 'Assets',
@@ -19,6 +21,10 @@ export const DICT_ENTRIES = {
   '点击切换单位 min / h / s': 'Click to switch unit min / h / s', '状态矢量': 'State vector', '位置 r': 'Position r', '速度 v': 'Velocity v', '等待后台': 'waiting for backend',
   '视图与图层': 'View & layers', '展开视图与图层': 'Show view & layer panel', '收起视图与图层': 'Hide view & layer panel', '收起到左侧': 'Tuck into left edge',
   '正视图': 'Front', '俯视图': 'Top', '视角重置': 'Reset View', '正视图 (F)': 'Front view (F)', '俯视图 (T)': 'Top view (T)', '视角重置 (0)': 'Reset view (0)',
+  '轨道面': 'Plane', '轨道面视角': 'Plane view', '轨道面视角：按倾角与升交点赤经俯视 (P)': 'Plane view: look down by inclination and RAAN (P)',
+  '沿轨道面法向从上往下看': 'Looks straight down the orbit-plane normal', '取选中轨道': 'From selected', '应用视角': 'Apply view',
+  '填入当前选中轨道的倾角与升交点赤经': "Use the selected orbit's inclination and RAAN",
+  '轨道倾角需在 0–180° 之间。': 'Inclination must be between 0 and 180°.', '请输入有效的升交点赤经。': 'Enter a valid RAAN.',
   '坐标轴': 'Axes', '黄道面': 'Ecliptic', '赤道面': 'Equator', '参考轨道': 'Ghost Orbit', '完整轨道淡参考': 'Faint full-orbit reference',
   '选择坐标系': 'Choose reference frame', '坐标系选项': 'Frame options', '地心惯性系': 'Earth-centred inertial', '地心地固系': 'Earth-centred, Earth-fixed',
   '选择中心天体与动力学模型': 'Choose central body and dynamics model', '中心天体模型': 'Central body model', '地球': 'Earth', '地球 · 二体': 'Earth · Two-body',
@@ -65,7 +71,7 @@ export const DICT_ENTRIES = {
   '控制台': 'Console', '等待计算服务日志…': 'Waiting for compute service logs…', '计算服务初始化中…': 'Compute service initialising…',
   // drawers
   '固定资产': 'Pin assets', '固定标定': 'Pin calibration', '固定设置': 'Pin settings',
-  '轨道组名称': 'Group name', '例如：晨昏轨道组': 'e.g. Dawn–dusk group', '保存当前轨道组': 'Save Group', '重命名': 'Rename',
+  '轨道组名称': 'Group name', '保存当前轨道组': 'Save Group', '重命名': 'Rename',
   '未保存': 'Unsaved', '已保存': 'Saved', '有未保存修改': 'Unsaved changes', '暂无轨道组。保存当前轨道组后可在此快速切换。': 'No orbit groups yet. Save the current group to switch here quickly.',
   '数据导入导出': 'Import / Export', '导入 JSON': 'Import JSON', '导入 TXT': 'Import TXT', 'v1 / v2 快照或 orbits 数组': 'v1 / v2 snapshot or orbits array',
   '名称行 + 五或六个根数值': 'Name line + five or six element values', '导出 JSON': 'Export JSON', '当前轨道组快照': 'Current group snapshot',
@@ -90,7 +96,7 @@ export const DICT_ENTRIES = {
   '均衡：星下点每圈 160 采样，三维参考轨道 ≤ 1800 点。': 'Balanced: 160 ground-track samples per rev, ≤ 1800 reference points.',
   '高性能：星下点每圈 240 采样，三维参考轨道 ≤ 3600 点（默认）。': 'High performance: 240 ground-track samples per rev, ≤ 3600 reference points (default).',
   '自定义：按下方显存预算缩放采样上限。': 'Custom: sampling limits scale with the memory budget below.',
-  '组名，例如：晨昏轨道组': 'Group name, e.g. Dawn–dusk', '保存当前组': 'Save Group', '载入': 'Load', '载入此轨道组': 'Load this group', '导入': 'Import',
+  '保存当前组': 'Save Group', '载入': 'Load', '载入此轨道组': 'Load this group', '导入': 'Import',
   '计算余量：100% 减去后台计算负载（取帧耗时占帧间隔的比例与计算线程占用中的较大值）': 'Compute headroom: 100% minus backend load (the larger of frame time over frame interval and worker-thread occupancy)',
   '计算热度：由计算负载折算的指示值（36–47），随负载缓慢升降，非硬件温度': 'Compute heat: an indicator derived from compute load (36–47) that rises and falls slowly; not a hardware temperature',
   '渲染帧时间': 'Render frame time',
@@ -106,7 +112,7 @@ export const DICT_ENTRIES = {
   '通过星下点视图查看地面轨迹和区域统计；标定抽屉提供位置及速度矢量标定。': 'Use the Track view for ground tracks and region stats; the Calib drawer solves position and velocity vectors.',
   '轨道计算由本地后台执行。计算状态、任务账本与日志在「任务」视图查看。': 'Orbits are computed by the local backend. Status, the job ledger and logs live in the Queue view.',
   '快捷键': 'Shortcuts', '切换 工作台 / 星下点 / 任务': 'Switch Deck / Track / Queue', '运行 / 暂停': 'Run / Pause', '重置时间至 T+0': 'Reset time to T+0',
-  '正视图 / 俯视图 / 视角重置': 'Front / Top / Reset view', '+拖拽': '+drag', '星下点框选区域统计': 'Box a region on the ground-track map',
+  '正视图 / 俯视图 / 视角重置': 'Front / Top / Reset view', '轨道面视角（按倾角与升交点赤经俯视）': 'Plane view (look down by inclination and RAAN)', '+拖拽': '+drag', '星下点框选区域统计': 'Box a region on the ground-track map',
   '关闭菜单 / 抽屉 / 弹窗': 'Close menus / drawers / dialogs', '双击 T+': 'Double-click T+', '循环切换 s / min / hr / day': 'Cycle s / min / hr / day', '轨道分类': 'Orbit classes',
   'a = 42164 ± 200 km，e < 0.01，i < 5°': 'a = 42164 ± 200 km, e < 0.01, i < 5°', '同一 a 区间，i ≥ 5°': 'same a band, i ≥ 5°',
   'e ≥ 0.6，i = 63.4 ± 3°，T = 11.5–12.5 h': 'e ≥ 0.6, i = 63.4 ± 3°, T = 11.5–12.5 h', '其余 e ≥ 0.25': 'any other e ≥ 0.25',
@@ -142,6 +148,13 @@ export const PAIR_ENTRIES = {
 };
 
 export const PATTERNS = [
+  [/^位置矢量轨迹 · ([\d,]+) 个采样点$/, 'Position trajectory · $1 samples'],
+  [/^(轨道六要素|统一六要素组) · 组名 (.+)$/, (tr, kind, name) => `${tr(kind)} · ${name}`],
+  [/^组名，留空默认 (.+)$/, 'Group name (default $1)'],
+  [/^确认后替换当前场景中的 (\d+) 条轨道。$/, 'Confirming replaces the $1 orbits in the scene.'],
+  [/^(ECI|ECEF) · ([\d,]+) 点 · (.+) · ([\d,]+) s$/, '$1 · $2 pts · $3 · $4 s'],
+  [/^导入(轨道六要素|统一六要素组|位置矢量轨迹)失败：(.+)$/, (tr, kind, message) => `${tr(kind)} import failed: ${tr(message)}`],
+  [/^导入失败：(.+)$/, (tr, message) => `Import failed: ${tr(message)}`],
   [/^(\d\d:\d\d:\d\d)\s+(.+)$/, (tr, time, message) => `${time}  ${tr(message)}`],
   [/^播放已暂停 · (.+)$/, (tr, message) => `Playback paused · ${tr(message)}`],
   [/^本地保存失败 · (.+)$/, (tr, message) => `Local save failed · ${tr(message)}`],

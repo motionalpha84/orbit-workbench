@@ -147,6 +147,9 @@ export function closeDropdowns(except = null) {
     if (button === except) continue;
     button.setAttribute('aria-expanded', 'false');
     button.parentElement.querySelector('.dd-menu').hidden = true;
+    // side flyouts (MODEL) fold with their menu
+    for (const fly of button.parentElement.querySelectorAll('.dd-fly')) fly.hidden = true;
+    for (const row of button.parentElement.querySelectorAll('.dd-row')) row.setAttribute('aria-expanded', 'false');
   }
 }
 function openDropdown(button, focusFirst) {

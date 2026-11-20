@@ -830,6 +830,17 @@ export class OrbitScene {
     this.controls.setView(DEFAULT_CAMERA_POSITION, DEFAULT_CAMERA_UP);
   }
 
+  // Looks down the orbit-plane normal (ECI → scene maps (x, y, z) to (x, z, −y)); the up vector
+  // matches the schematic renderer's so both show the plane the same way round.
+  setPlaneView(inclinationDeg, raanDeg) {
+    const i = THREE.MathUtils.degToRad(inclinationDeg);
+    const raan = THREE.MathUtils.degToRad(raanDeg);
+    const currentRadius = Math.max(this.camera.position.distanceTo(this.controls.target), DEFAULT_CAMERA_POSITION.length());
+    const normal = new THREE.Vector3(Math.sin(i) * Math.sin(raan), Math.cos(i), Math.sin(i) * Math.cos(raan));
+    const up = new THREE.Vector3(-Math.sin(raan) * Math.cos(i), Math.sin(i), -Math.cos(raan) * Math.cos(i));
+    this.controls.setView(normal.multiplyScalar(currentRadius), up);
+  }
+
   syncOrbits(orbits, perturbationModel = this.perturbationModel) {
     const model = normalizePerturbationModel(perturbationModel);
     this.perturbationModel = model;

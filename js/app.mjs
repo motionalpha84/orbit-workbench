@@ -11,10 +11,13 @@ import {
   DEFAULT_ORBIT_COLORS,
   hexToRgb,
   nextOrbitColor,
+  displayColorOnLight,
   normalizeHexColor,
   rgbToHex,
 } from './color.mjs';
-import { parseOrbitText } from './importers.mjs';
+import { parseElementGroupText, parseOrbitFile, parseTrajectoryText } from './importers.mjs';
+import { smoothTrajectory } from './trajectory.mjs';
+import { BODIES, bodyById, modelForBody, modelsForBody } from './bodies.mjs';
 import {
   groundTrackBudget,
   groundTrackCsv,
@@ -70,6 +73,13 @@ const els = {
   orbitListCount: document.querySelector('#orbit-list-count'),
   frameValue: document.querySelector('#frame-value'),
   bodyValue: document.querySelector('#body-value'),
+  modelFlyRows: [...document.querySelectorAll('[data-model-fly]')],
+  bodyOptions: document.querySelector('#body-options'),
+  dynamicsNote: document.querySelector('#dynamics-note'),
+  modelSumBody: document.querySelector('#model-sum-body'),
+  modelSumBodyNote: document.querySelector('#model-sum-body-note'),
+  modelSumModel: document.querySelector('#model-sum-model'),
+  modelSumModelNote: document.querySelector('#model-sum-model-note'),
   statusOrbitMenu: document.querySelector('#status-orbit-menu'),
   orbitTooltip: document.querySelector('#orbit-tooltip'),
   selectedOrbitName: document.querySelector('#selected-orbit-name'),
@@ -95,6 +105,14 @@ const els = {
   frontView: document.querySelector('#front-view'),
   topView: document.querySelector('#top-view'),
   resetView: document.querySelector('#reset-view'),
+  planeViewToggle: document.querySelector('#plane-view-toggle'),
+  planeViewPop: document.querySelector('#plane-view-pop'),
+  planeViewForm: document.querySelector('#plane-view-form'),
+  planeViewInc: document.querySelector('#plane-view-inc'),
+  planeViewRaan: document.querySelector('#plane-view-raan'),
+  planeViewError: document.querySelector('#plane-view-error'),
+  planeViewFromOrbit: document.querySelector('#plane-view-from-orbit'),
+  toolsPanel: document.querySelector('#tools-panel'),
   speedFactor: document.querySelector('#speed-factor'),
   timeReadoutPanel: document.querySelector('.simulation-time-panel'),
   timeReadout: document.querySelector('#time-readout'),
@@ -159,6 +177,27 @@ const els = {
   exportJson: document.querySelector('#export-json'),
   importJson: document.querySelector('#import-json'),
   importTxt: document.querySelector('#import-txt'),
+  importGroupTxt: document.querySelector('#import-group-txt'),
+  importTrajectoryTxt: document.querySelector('#import-trajectory-txt'),
+  importDataToggle: document.querySelector('#import-data-toggle'),
+  importDataOptions: document.querySelector('#import-data-options'),
+  trajectorySection: document.querySelector('#trajectory-section'),
+  trajectoryList: document.querySelector('#trajectory-list'),
+  trajectoryCount: document.querySelector('#trajectory-count'),
+  importDialog: document.querySelector('#import-dialog'),
+  importDialogKind: document.querySelector('#import-dialog-kind'),
+  importDialogCount: document.querySelector('#import-dialog-count'),
+  importDialogFile: document.querySelector('#import-dialog-file'),
+  importDialogMeta: document.querySelector('#import-dialog-meta'),
+  importDialogTable: document.querySelector('#import-dialog-table'),
+  importDialogPreview: document.querySelector('#import-dialog-preview'),
+  importDialogNote: document.querySelector('#import-dialog-note'),
+  importBodyChoice: document.querySelector('#import-body-choice'),
+  importFrameChoice: document.querySelector('#import-frame-choice'),
+  importDialogError: document.querySelector('#import-dialog-error'),
+  importDialogConfirm: document.querySelector('#import-dialog-confirm'),
+  helpFormatTabs: [...document.querySelectorAll('[data-help-format-tab]')],
+  helpFormatDownload: document.querySelector('#help-format-download'),
   clearAll: document.querySelector('#clear-all'),
   toggles: {
     axes: document.querySelector('#toggle-axes'),
@@ -284,6 +323,7 @@ const state = {
   calibrationEditingTargetId: null,
   calibrationEditorError: '',
   calibrationTargets: [],
+  trajectories: [],
   calibrationResult: null,
   calibrationExpandedTargetIds: new Set(),
   hiddenCalibrationTargetIds: new Set(),
@@ -301,6 +341,8 @@ const state = {
 
 let workspaceOperation = 0;
 let calibrationOperation = 0;
+// Help opened from a module's 格式 button hands back to that module (and the button) on close.
+let helpReturn = null;
 let frameRevision = 0;
 let frameDirty = true;
 let framePending = false;
@@ -1123,9 +1165,20 @@ function perturbationLabel(value = state.perturbationModel) {
 }
 
 function updateStatusSelections() {
+  if (!els.bodyOptions.childElementCount) renderBodyOptions();
+  const body = bodyById(state.centerBody);
+  const shortModel = state.perturbationModel === 'two-body' ? '二体' : state.perturbationModel.toUpperCase();
   els.frameValue.textContent = state.frame;
-  els.bodyValue.textContent = state.perturbationModel === 'two-body' ? '地球 · 二体' : `地球 · ${state.perturbationModel.toUpperCase()}`;
+  els.bodyValue.textContent = `${body.name} · ${shortModel}`;
   els.bodyValue.title = perturbationLabel();
+  els.modelSumBody.textContent = body.name;
+  els.modelSumBodyNote.textContent = `${body.code} · R ${body.radiusKm} km`;
+  els.modelSumModel.textContent = { 'two-body': '二体', j2: 'J2 摄动', j3: 'J3 摄动' }[state.perturbationModel] ?? '二体';
+  els.modelSumModelNote.textContent = { 'two-body': '无摄动（二体运动）', j2: '含 J2 项', j3: '含 J2 + J3 项' }[state.perturbationModel] ?? '无摄动（二体运动）';
+  // J2 / J3 only exist for bodies that offer them (Earth)
+  const models = modelsForBody(body.id);
+  for (const option of document.querySelectorAll('#dynamics-flyout [data-perturbation-model]')) option.hidden = !models.includes(option.dataset.perturbationModel);
+  els.dynamicsNote.hidden = models.length > 1;
   const mark = (selector, key, value) => {
     for (const button of document.querySelectorAll(selector)) {
       const active = button.dataset[key] === value;
@@ -1141,6 +1194,59 @@ function updateStatusSelections() {
 // FRAME / MODEL / ORB menus replace the v2.1 status cards.
 function closeStatusCards() {
   closeDropdowns();
+}
+
+// MODEL lists the current body and model; a row's side arrow opens its flyout of choices.
+function renderBodyOptions() {
+  els.bodyOptions.replaceChildren(...BODIES.map((body) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dd-opt status-option body-option';
+    button.setAttribute('role', 'menuitemradio');
+    button.dataset.bodyOption = body.id;
+    button.disabled = !body.available;
+    button.innerHTML = `<i></i><b>${escapeHtml(body.name)}</b><small>${escapeHtml(body.available ? `${body.code} · R ${body.radiusKm} km` : `${body.code} · 待后台接入`)}</small>`;
+    button.addEventListener('click', () => selectCenterBody(body.id));
+    return button;
+  }));
+}
+
+function modelFlyoutOpen() {
+  return els.modelFlyRows.find((row) => row.getAttribute('aria-expanded') === 'true') ?? null;
+}
+
+function setModelFlyout(kind, { focus = false } = {}) {
+  for (const row of els.modelFlyRows) {
+    const on = row.dataset.modelFly === kind;
+    const fly = document.getElementById(row.getAttribute('aria-controls'));
+    row.setAttribute('aria-expanded', String(on));
+    fly.hidden = !on;
+    if (!on) continue;
+    fly.classList.remove('in'); void fly.offsetWidth; fly.classList.add('in');
+    if (focus) (fly.querySelector('[aria-checked="true"]:not([hidden])') ?? fly.querySelector('button:not(:disabled):not([hidden])'))?.focus();
+  }
+}
+
+// After a choice the flyout folds and the summary row (now showing the new value) keeps focus.
+function closeModelFlyout() {
+  const row = modelFlyoutOpen();
+  setModelFlyout(null);
+  row?.focus();
+}
+
+function selectCenterBody(id) {
+  const body = bodyById(id);
+  if (!body.available || body.id !== id) return;
+  if (state.centerBody !== id) {
+    state.centerBody = id;
+    state.perturbationModel = modelForBody(id, state.perturbationModel);
+    clearGroundTrackHistories();
+    clearVectorCalibration();
+    markSceneDirty();
+  }
+  renderUi();
+  closeModelFlyout();
+  saveState();
 }
 
 function closeInfoModal() {
@@ -1245,6 +1351,7 @@ function setActiveView(view, { animate = true } = {}) {
   if (isSwitching()) return;
   setColorFlyout(false);
   closeDropdowns();
+  setPlaneViewPop(false);
   hideOrbitTooltip();
   const swap = () => {
     state.activeView = view;
@@ -1259,6 +1366,7 @@ function setActiveView(view, { animate = true } = {}) {
 
 function openModule(moduleName, { preview = false } = {}) {
   if (!moduleName) return;
+  if (moduleName !== 'info' && !preview) helpReturn = null;
   clearTimeout(state.hoverPreviewTimer);
   state.hoverPreviewTimer = null;
   if (VIEW_MODULES.includes(moduleName)) {
@@ -1281,7 +1389,14 @@ function openModule(moduleName, { preview = false } = {}) {
 
 function closeActiveModule() {
   if (!state.activeModule) return;
+  const back = state.activeModule === 'info' ? helpReturn : null;
+  helpReturn = null;
   if (state.activeModule === 'info') closeInfoModal();
+  if (back) {
+    openModule(back.module);
+    setTimeout(() => back.focus?.focus({ preventScroll: true }), 80);
+    return;
+  }
   state.activeModule = null;
   state.committedModule = null;
   state.previewModule = null;
@@ -1761,8 +1876,10 @@ function calibrationMarkersFromBatchResult(result) {
       orbitName: hit.orbitName,
       color: hit.color,
       positionKm: hit.positionKm,
+      velocityKmS: hit.velocityKmS,
       residual: hit.residual,
       elapsedSeconds: hit.elapsedSeconds,
+      perturbationModel: hit.perturbationModel,
       visible: !state.hiddenCalibrationTargetIds.has(targetResult.targetId),
     }))
   ));
@@ -1985,19 +2102,41 @@ function orbitTooltipHtml(record) {
   `;
 }
 
+function calibrationTooltipHtml(marker) {
+  const rows = [
+    ['类型', calibrationModeLabel(marker.targetMode)],
+    ['轨道', marker.orbitName],
+    ['仿真时刻', `${formatNumber(marker.elapsedSeconds, 3)} s`],
+    ['ECI 位置', `${formatCalibrationVector(marker.positionKm, 3)} km`],
+    ['ECI 速度', `${formatCalibrationVector(marker.velocityKmS, 5)} km/s`],
+    ['残差', `${formatNumber(marker.residual, marker.targetMode === 'velocity' ? 8 : 5)} ${calibrationResidualUnit(marker.targetMode)}`],
+    ['动力学', marker.perturbationModel ?? '--'],
+  ];
+  return `
+    <span class="tt-k" data-i18n-skip>CALIB // TARGET</span>
+    <strong>${escapeHtml(marker.targetName)}</strong>
+    <dl>
+      ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}
+    </dl>
+  `;
+}
+
 function hideOrbitTooltip() {
   els.orbitTooltip.hidden = true;
 }
 
+// Hovering an orbit shows its six elements; a calibration hit or imported trajectory shows its own details.
 function showOrbitTooltip(payload) {
   if (state.activeView !== 'workbench') payload = null;
-  if (!payload?.orbitRecord) {
+  const marker = payload?.calibrationMarker ?? null;
+  const trajectory = payload?.trajectory ?? null;
+  if (!payload?.orbitRecord && !marker && !trajectory) {
     els.orbitTooltip.hidden = true;
     return;
   }
   const { orbitRecord, clientX, clientY } = payload;
-  els.orbitTooltip.innerHTML = orbitTooltipHtml(orbitRecord);
-  els.orbitTooltip.style.setProperty('--orbit-tooltip-color', orbitRecord.color);
+  els.orbitTooltip.innerHTML = marker ? calibrationTooltipHtml(marker) : trajectory ? trajectoryTooltipHtml(trajectory) : orbitTooltipHtml(orbitRecord);
+  els.orbitTooltip.style.setProperty('--orbit-tooltip-color', (marker ?? trajectory ?? orbitRecord).color);
   els.orbitTooltip.hidden = false;
 
   const margin = 16;
@@ -2006,6 +2145,65 @@ function showOrbitTooltip(payload) {
   const top = Math.min(window.innerHeight - rect.height - margin, clientY + 18);
   els.orbitTooltip.style.left = `${Math.max(margin, left)}px`;
   els.orbitTooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+/* ---------- orbit-plane view: look down the plane given by inclination and RAAN ---------- */
+function planeViewOpen() {
+  return !els.planeViewPop.hidden;
+}
+
+// The tools plate is clipped, so the popover lives on the stage and is placed over the VIEW
+// button. Layout offsets (not client rects) ignore the plate's slide-in transform.
+function placePlaneViewPop() {
+  const stage = els.planeViewPop.parentElement;
+  let left = 0;
+  for (let node = els.planeViewToggle; node && node !== stage; node = node.offsetParent) left += node.offsetLeft;
+  const maxLeft = stage.clientWidth - els.planeViewPop.offsetWidth - 12;
+  els.planeViewPop.style.left = `${Math.max(12, Math.min(left, maxLeft))}px`;
+  els.planeViewPop.style.bottom = `${stage.clientHeight - els.toolsPanel.offsetTop + 8}px`;
+}
+
+function setPlaneViewPop(open, { focus = false } = {}) {
+  if (open === planeViewOpen()) return;
+  els.planeViewToggle.setAttribute('aria-expanded', String(open));
+  els.planeViewPop.hidden = !open;
+  if (!open) return;
+  closeDropdowns();
+  if (els.toolsPanel.classList.contains('away')) document.getElementById('tools-tab').click();
+  els.planeViewFromOrbit.disabled = !selectedOrbitRecord();
+  placePlaneViewPop();
+  els.planeViewPop.classList.remove('in'); void els.planeViewPop.offsetWidth; els.planeViewPop.classList.add('in');
+  if (focus) els.planeViewInc.focus({ preventScroll: true });
+}
+
+function showPlaneViewError(message = '', field = null) {
+  els.planeViewError.textContent = message;
+  els.planeViewError.classList.toggle('is-visible', Boolean(message));
+  for (const input of [els.planeViewInc, els.planeViewRaan]) input.closest('.pp-f').classList.toggle('bad', input === field);
+}
+
+function applyPlaneView(event) {
+  event?.preventDefault();
+  const inclination = els.planeViewInc.value.trim() === '' ? NaN : Number(els.planeViewInc.value);
+  const raan = els.planeViewRaan.value.trim() === '' ? NaN : Number(els.planeViewRaan.value);
+  if (!Number.isFinite(inclination) || inclination < 0 || inclination > 180) {
+    showPlaneViewError('轨道倾角需在 0–180° 之间。', els.planeViewInc);
+    return;
+  }
+  if (!Number.isFinite(raan)) {
+    showPlaneViewError('请输入有效的升交点赤经。', els.planeViewRaan);
+    return;
+  }
+  showPlaneViewError();
+  scene.setPlaneView(inclination, raan);
+}
+
+function planeViewFromSelectedOrbit() {
+  const elements = selectedOrbitRecord()?.orbit?.elements;
+  if (!elements) return;
+  els.planeViewInc.value = String(Number(elements.inclinationDeg.toFixed(6)));
+  els.planeViewRaan.value = String(Number(elements.raanDeg.toFixed(6)));
+  applyPlaneView();
 }
 
 function currentGroundTrackBudget() {
@@ -2258,6 +2456,7 @@ function renderAssetLibrary() {
   els.assetDirtyState.classList.toggle('dirty', state.isSceneDirty);
   renderRosterMeta();
   els.assetGroupName.value = activeGroup?.name ?? els.assetGroupName.value;
+  els.assetGroupName.placeholder = `组名，留空默认 ${defaultAssetGroupName()}`;
   els.assetGroupList.innerHTML = '';
 
   if (state.assetGroups.length === 0) {
@@ -2315,8 +2514,16 @@ function renderAssetLibrary() {
   }
 }
 
+// Unnamed groups take 轨道组001, 轨道组002 … — the first number not already used.
+function defaultAssetGroupName() {
+  const taken = new Set(state.assetGroups.map((group) => group.name));
+  let n = 1;
+  while (taken.has(`轨道组${String(n).padStart(3, '0')}`)) n += 1;
+  return `轨道组${String(n).padStart(3, '0')}`;
+}
+
 function saveCurrentAssetGroup() {
-  const name = els.assetGroupName.value.trim() || activeAssetGroup()?.name || `轨道组 ${state.assetGroups.length + 1}`;
+  const name = els.assetGroupName.value.trim() || activeAssetGroup()?.name || defaultAssetGroupName();
   const now = new Date().toISOString();
   const snapshot = serializeWorkbenchSnapshot();
   let group = activeAssetGroup();
@@ -2375,6 +2582,8 @@ function clearCurrentSceneWithConfirmation() {
   workspaceOperation += 1;
   persistenceReady = true;
   state.orbits = [];
+  state.trajectories = [];
+  renderTrajectories();
   state.isPlaying = false;
   setSelectedOrbitIds([]);
   state.editingId = null;
@@ -2595,37 +2804,286 @@ async function importJson(file) {
   }
 }
 
-async function importTxt(file) {
+/* ---------- import: TXT kinds go through the import window (central body or frame) ---------- */
+// Trajectories live beside the orbit roster for this session only; workspace JSON does not
+// carry them yet (docs/import-integration.md).
+let pendingImport = null;
+const IMPORT_KINDS = {
+  elements: { code: 'IMPORT · ORBIT ELEMENTS', label: '轨道六要素' },
+  group: { code: 'IMPORT · ELEMENT GROUP', label: '统一六要素组' },
+  trajectory: { code: 'IMPORT · TRAJECTORY', label: '位置矢量轨迹' },
+};
+
+function setImportOptionsOpen(open) {
+  els.importDataToggle.setAttribute('aria-expanded', String(open));
+  els.importDataOptions.hidden = !open;
+  if (open) { els.importDataOptions.classList.remove('in'); void els.importDataOptions.offsetWidth; els.importDataOptions.classList.add('in'); }
+}
+
+async function readImportFile(input, kind, parse) {
+  const file = input.files[0];
   if (!file) return;
   try {
-    const text = await file.text();
-    const parsed = parseOrbitText(text);
-    const version = ++workspaceOperation;
-    const imported = await buildOrbitRecordsFromSerialized(parsed.map((item, index) => ({
-      id: uuid(),
-      color: nextOrbitColor(index),
-      visible: true,
-      elements: item,
-    })));
-    if (version !== workspaceOperation) throw new Error('场景已更新，忽略过期导入。');
-    state.orbits = imported;
-    persistenceReady = true;
-    state.isPlaying = false;
-    state.elapsedSeconds = 0;
-    setSelectedOrbitIds(imported[0] ? [imported[0].id] : [], { currentId: imported[0]?.id ?? null });
-    state.editingId = null;
-    state.currentAssetId = null;
-    state.isSceneDirty = true;
-    clearGroundTrackHistories();
-    clearVectorCalibration();
-    resetForm();
-    renderUi();
-    saveState();
+    openImportDialog({ kind, fileName: file.name, ...parse(await file.text(), file.name) });
   } catch (error) {
-    showErrors(`导入 TXT 失败：${error.message}`);
+    showErrors(`导入${IMPORT_KINDS[kind].label}失败：${error.message}`);
   } finally {
-    els.importTxt.value = '';
+    input.value = '';
   }
+}
+
+const importTxt = () => readImportFile(els.importTxt, 'elements', (text) => parseOrbitFile(text));
+const importGroupTxt = () => readImportFile(els.importGroupTxt, 'group', (text) => parseElementGroupText(text));
+const importTrajectoryTxt = () => readImportFile(els.importTrajectoryTxt, 'trajectory', (text, fileName) => {
+  const parsed = parseTrajectoryText(text);
+  const base = fileName.replace(/\.[^.]+$/, '');
+  const offset = state.orbits.length + state.trajectories.length;
+  return {
+    trajectories: parsed.map((trajectory, index) => ({
+      ...trajectory,
+      // an unnamed single trajectory takes the file name
+      name: parsed.length === 1 && /^轨迹 \d+$/.test(trajectory.name) ? base : trajectory.name,
+      color: nextOrbitColor(offset + index),
+      dense: smoothTrajectory(trajectory.samples),
+    })),
+  };
+});
+
+function importTableHtml(pending) {
+  const limit = 60;
+  if (pending.kind === 'trajectory') {
+    const rows = pending.trajectories.map((trajectory) => [
+      `<span class="sw-dot" style="--c:${trajectory.color}"></span>${escapeHtml(trajectory.name)}`,
+      formatNumber(trajectory.samples.length, 0),
+      escapeHtml(trajectoryStartLabel(trajectory.timeOrigin)),
+      formatNumber(trajectory.samples[trajectory.samples.length - 1].t, 1),
+      trajectory.hasVelocity ? 'r + v' : 'r',
+    ]);
+    return `<thead><tr><th>NAME</th><th>PTS</th><th>START</th><th>SPAN s</th><th>DATA</th></tr></thead><tbody>${rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  }
+  const rows = pending.records.slice(0, limit).map((item) => [
+    escapeHtml(item.name), formatNumber(item.semiMajorAxisKm, 3), formatNumber(item.eccentricity, 6), formatNumber(item.inclinationDeg, 4),
+    formatNumber(item.raanDeg, 4), formatNumber(item.argPeriapsisDeg, 4), formatNumber(item.trueAnomalyDeg, 4),
+  ]);
+  const more = pending.records.length > limit ? `<tr class="more"><td colspan="7">… +${pending.records.length - limit}</td></tr>` : '';
+  return `<thead><tr><th>NAME</th><th>a km</th><th>e</th><th>i °</th><th>Ω °</th><th>ω °</th><th>ν °</th></tr></thead><tbody>${rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}${more}</tbody>`;
+}
+
+function trajectoryStartLabel(timeOrigin) {
+  return timeOrigin.kind === 'utc'
+    ? `${new Date(timeOrigin.utcMs).toISOString().slice(0, 19).replace('T', ' ')}Z`
+    : `T+${formatNumber(timeOrigin.elapsedSeconds, 1)} s`;
+}
+
+function openImportDialog(pending) {
+  pendingImport = pending;
+  const isTrajectory = pending.kind === 'trajectory';
+  const count = isTrajectory ? pending.trajectories.length : pending.records.length;
+  els.importDialogKind.textContent = IMPORT_KINDS[pending.kind].code;
+  els.importDialogFile.textContent = pending.fileName;
+  els.importDialogCount.textContent = `${count} 条`;
+  els.importDialogMeta.textContent = isTrajectory
+    ? `位置矢量轨迹 · ${pending.trajectories.reduce((sum, trajectory) => sum + trajectory.samples.length, 0)} 个采样点`
+    : pending.groupName ? `${IMPORT_KINDS[pending.kind].label} · 组名 ${pending.groupName}` : IMPORT_KINDS[pending.kind].label;
+  els.importDialogTable.innerHTML = importTableHtml(pending);
+  els.importDialogNote.textContent = isTrajectory
+    ? '轨迹叠加显示在工作台，不替换现有轨道；本次会话内保留，刷新页面后需重新导入。'
+    : state.orbits.length ? `确认后替换当前场景中的 ${state.orbits.length} 条轨道。` : '确认后载入为当前场景。';
+  els.importBodyChoice.hidden = isTrajectory;
+  els.importFrameChoice.hidden = !isTrajectory;
+  for (const input of els.importDialog.querySelectorAll('input[type="radio"]')) input.checked = false;
+  showImportError('');
+  syncImportConfirm();
+  els.importDialogPreview.hidden = !isTrajectory;
+  els.importDialog.classList.add('is-open');
+  document.getElementById('import-scrim').classList.add('is-on');
+  if (isTrajectory) requestAnimationFrame(() => drawTrajectoryPreview(pending.trajectories));
+  setTimeout(() => els.importDialog.querySelector('fieldset:not([hidden]) input:not(:disabled)')?.focus({ preventScroll: true }), 60);
+}
+
+function importDialogOpen() {
+  return els.importDialog.classList.contains('is-open');
+}
+
+function closeImportDialog() {
+  pendingImport = null;
+  els.importDialog.classList.remove('is-open');
+  document.getElementById('import-scrim').classList.remove('is-on');
+}
+
+function importChoice() {
+  const name = pendingImport?.kind === 'trajectory' ? 'import-frame' : 'import-body';
+  return els.importDialog.querySelector(`input[name="${name}"]:checked`)?.value ?? null;
+}
+
+function syncImportConfirm() {
+  els.importDialogConfirm.disabled = !importChoice();
+  els.importDialogConfirm.title = els.importDialogConfirm.disabled ? (pendingImport?.kind === 'trajectory' ? '请先选择坐标系' : '请先选择中心天体') : '';
+}
+
+function showImportError(message) {
+  els.importDialogError.textContent = message;
+  els.importDialogError.classList.toggle('is-visible', Boolean(message));
+}
+
+async function confirmImport() {
+  const pending = pendingImport;
+  const choice = importChoice();
+  if (!pending || !choice) return;
+  els.importDialogConfirm.disabled = true;
+  try {
+    if (pending.kind === 'trajectory') addTrajectories(pending.trajectories, choice);
+    else await applyElementsImport(pending.records, { centerBody: choice, groupName: pending.groupName });
+    closeImportDialog();
+  } catch (error) {
+    showImportError(`导入失败：${error.message}`);
+    syncImportConfirm();
+  }
+}
+
+// Equatorial-plane (x–y) sketch of the smoothed curves as they appear in the file's coordinates.
+function drawTrajectoryPreview(trajectories) {
+  const canvas = els.importDialogPreview;
+  const W = canvas.clientWidth; const H = canvas.clientHeight;
+  if (!W || !H) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  let extent = 6378.137;
+  for (const trajectory of trajectories) for (const { p } of trajectory.dense) extent = Math.max(extent, Math.abs(p[0]), Math.abs(p[1]));
+  const k = (Math.min(W, H) / 2 - 14) / extent;
+  const cx = W / 2; const cy = H / 2;
+  ctx.strokeStyle = 'rgba(34,50,58,.12)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+  ctx.fillStyle = '#EEF4F3'; ctx.strokeStyle = '#627276';
+  ctx.beginPath(); ctx.arc(cx, cy, 6378.137 * k, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  for (const trajectory of trajectories) {
+    ctx.strokeStyle = displayColorOnLight(trajectory.color); ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    trajectory.dense.forEach(({ p }, index) => (index ? ctx.lineTo(cx + p[0] * k, cy - p[1] * k) : ctx.moveTo(cx + p[0] * k, cy - p[1] * k)));
+    ctx.stroke();
+    ctx.fillStyle = '#22323A';
+    if (trajectory.samples.length <= 400) {
+      for (const { positionKm } of trajectory.samples) { ctx.beginPath(); ctx.arc(cx + positionKm.x * k, cy - positionKm.y * k, 1.6, 0, Math.PI * 2); ctx.fill(); }
+    }
+    const start = trajectory.samples[0].positionKm;
+    ctx.strokeStyle = '#22323A'; ctx.lineWidth = 1.2; ctx.strokeRect(cx + start.x * k - 3.5, cy - start.y * k - 3.5, 7, 7);
+  }
+  ctx.font = '500 9.5px "JetBrains Mono",Consolas,monospace'; ctx.fillStyle = '#4A5F64';
+  ctx.fillText('X', W - 12, cy - 4); ctx.fillText('Y', cx + 4, 11);
+  ctx.fillText('XY · SMOOTHED', 6, H - 6);
+}
+
+function addTrajectories(trajectories, frame) {
+  state.trajectories.push(...trajectories.map((trajectory) => ({
+    id: uuid(),
+    name: trajectory.name,
+    color: trajectory.color,
+    visible: true,
+    frame,
+    centerBody: 'earth',
+    timeOrigin: trajectory.timeOrigin,
+    hasVelocity: trajectory.hasVelocity,
+    samples: trajectory.samples,
+    dense: trajectory.dense,
+  })));
+  renderTrajectories();
+}
+
+function trajectoryMetaLabel(trajectory) {
+  const span = trajectory.samples[trajectory.samples.length - 1].t;
+  return `${trajectory.frame} · ${formatNumber(trajectory.samples.length, 0)} 点 · ${trajectoryStartLabel(trajectory.timeOrigin)} · ${formatNumber(span, 0)} s`;
+}
+
+function renderTrajectories() {
+  scene.setTrajectories?.(state.trajectories);
+  els.trajectorySection.hidden = state.trajectories.length === 0;
+  els.trajectoryCount.textContent = String(state.trajectories.length);
+  els.trajectoryList.replaceChildren(...state.trajectories.map((trajectory) => {
+    const row = document.createElement('div');
+    row.className = `traj-row${trajectory.visible ? '' : ' is-hidden'}`;
+    row.setAttribute('role', 'listitem');
+    row.style.setProperty('--c', trajectory.color);
+    row.innerHTML = `<i aria-hidden="true"></i><div><strong>${escapeHtml(trajectory.name)}</strong><span>${escapeHtml(trajectoryMetaLabel(trajectory))}</span></div>`;
+    const actions = document.createElement('div');
+    actions.className = 'ga';
+    actions.append(
+      iconButton('', trajectory.visible ? 'eye' : 'eyeOff', trajectory.visible ? '隐藏轨迹' : '显示轨迹', () => { trajectory.visible = !trajectory.visible; renderTrajectories(); }, !trajectory.visible),
+      iconButton('', 'trash', '删除轨迹', () => { state.trajectories = state.trajectories.filter((item) => item !== trajectory); renderTrajectories(); }),
+    );
+    row.append(actions);
+    return row;
+  }));
+}
+
+function trajectoryTooltipHtml(trajectory) {
+  const span = trajectory.samples[trajectory.samples.length - 1].t;
+  const rows = [
+    ['坐标系', trajectory.frame === 'ECEF' ? 'ECEF 地心地固系' : 'ECI 地心惯性系'],
+    ['采样点', formatNumber(trajectory.samples.length, 0)],
+    ['起始', trajectoryStartLabel(trajectory.timeOrigin)],
+    ['时长', `${formatNumber(span, 1)} s`],
+    ['平滑', trajectory.hasVelocity ? 'Hermite（位置 + 速度）' : 'Catmull-Rom（向心）'],
+  ];
+  return `
+    <span class="tt-k" data-i18n-skip>TRAJECTORY // IMPORTED</span>
+    <strong>${escapeHtml(trajectory.name)}</strong>
+    <dl>
+      ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}
+    </dl>
+  `;
+}
+
+/* ---------- help · import formats ---------- */
+function setHelpFormat(kind) {
+  for (const tab of els.helpFormatTabs) {
+    const on = tab.dataset.helpFormatTab === kind;
+    tab.setAttribute('aria-selected', String(on));
+    tab.setAttribute('aria-pressed', String(on));
+    document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
+  }
+}
+
+function openHelpFormat(kind, button) {
+  setHelpFormat(kind);
+  const from = state.activeModule && state.activeModule !== 'info' ? state.activeModule : null;
+  openModule('info');
+  helpReturn = from ? { module: from, focus: button } : null;
+  setTimeout(() => document.getElementById('help-formats')?.scrollIntoView({ block: 'start', behavior: RM.matches ? 'auto' : 'smooth' }), 120);
+}
+
+function downloadHelpFormatExample() {
+  const panel = document.querySelector('.hf-panel:not([hidden])');
+  if (panel) downloadText(panel.dataset.file, panel.querySelector('.hf-code').textContent);
+}
+
+async function applyElementsImport(parsed, { centerBody = 'earth', groupName = '' } = {}) {
+  if (centerBody !== 'earth') throw new Error('该中心天体尚未接入后台计算。');
+  const version = ++workspaceOperation;
+  const imported = await buildOrbitRecordsFromSerialized(parsed.map((item, index) => ({
+    id: uuid(),
+    color: nextOrbitColor(index),
+    visible: true,
+    elements: item,
+  })));
+  if (version !== workspaceOperation) throw new Error('场景已更新，忽略过期导入。');
+  state.orbits = imported;
+  state.centerBody = centerBody;
+  if (groupName) els.assetGroupName.value = groupName;
+  persistenceReady = true;
+  state.isPlaying = false;
+  state.elapsedSeconds = 0;
+  setSelectedOrbitIds(imported[0] ? [imported[0].id] : [], { currentId: imported[0]?.id ?? null });
+  state.editingId = null;
+  state.currentAssetId = null;
+  state.isSceneDirty = true;
+  clearGroundTrackHistories();
+  clearVectorCalibration();
+  resetForm();
+  renderUi();
+  saveState();
 }
 
 function bindEvents() {
@@ -2673,7 +3131,7 @@ function bindEvents() {
     if (!(target instanceof Element)) return;
     if (!target.closest('#simulation-run-control')) setRunLimitMenuOpen(false);
     // Unpinned drawers close on an outside click; views stay put.
-    const moduleSurface = target.closest('.side-module-panel, .module-sidebar, .info-dialog, .cfly, .dd');
+    const moduleSurface = target.closest('.side-module-panel, .module-sidebar, .info-dialog, .import-dialog, .import-scrim, .cfly, .dd');
     if (!moduleSurface && (state.activeModule === 'info' || (DRAWER_MODULES.has(state.activeModule) && !state.modulePins[state.activeModule]))) closeActiveModule();
   });
 
@@ -2758,6 +3216,7 @@ function bindEvents() {
 
   for (const button of document.querySelectorAll('[data-perturbation-model]')) {
     button.addEventListener('click', () => {
+      if (!modelsForBody(state.centerBody).includes(button.dataset.perturbationModel)) return;
       if (state.perturbationModel !== button.dataset.perturbationModel) {
         state.perturbationModel = button.dataset.perturbationModel;
         clearGroundTrackHistories();
@@ -2765,8 +3224,32 @@ function bindEvents() {
         markSceneDirty();
       }
       renderUi();
-      closeStatusCards();
+      closeModelFlyout();
       saveState();
+    });
+  }
+
+  for (const row of els.modelFlyRows) {
+    row.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setModelFlyout(row.getAttribute('aria-expanded') === 'true' ? null : row.dataset.modelFly, { focus: event.detail === 0 });
+    });
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft') { event.preventDefault(); setModelFlyout(row.dataset.modelFly, { focus: true }); }
+    });
+  }
+  for (const fly of document.querySelectorAll('.dd-fly')) {
+    fly.addEventListener('keydown', (event) => {
+      const items = [...fly.querySelectorAll('button:not(:disabled):not([hidden])')];
+      const index = items.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        event.stopPropagation();
+        items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        closeModelFlyout();
+      }
     });
   }
 
@@ -2849,6 +3332,15 @@ function bindEvents() {
   els.frontView.addEventListener('click', () => scene.setView('front'));
   els.topView.addEventListener('click', () => scene.setView('top'));
   els.resetView.addEventListener('click', () => scene.setView('default'));
+  els.planeViewToggle.addEventListener('click', (event) => setPlaneViewPop(!planeViewOpen(), { focus: event.detail === 0 }));
+  els.planeViewForm.addEventListener('submit', applyPlaneView);
+  els.planeViewFromOrbit.addEventListener('click', planeViewFromSelectedOrbit);
+  for (const input of [els.planeViewInc, els.planeViewRaan]) input.addEventListener('input', () => showPlaneViewError());
+  document.getElementById('tools-hide').addEventListener('click', () => setPlaneViewPop(false));
+  document.addEventListener('pointerdown', (event) => {
+    if (planeViewOpen() && !event.target.closest?.('#plane-view-pop, #plane-view-toggle')) setPlaneViewPop(false);
+  });
+  window.addEventListener('resize', () => { if (planeViewOpen()) placePlaneViewPop(); });
   els.speedFactor.addEventListener('change', () => {
     state.speedFactor = Number(els.speedFactor.value);
   });
@@ -2953,7 +3445,18 @@ function bindEvents() {
   document.getElementById('ground-track-screenshot')?.addEventListener('click', downloadSceneScreenshot);
   els.exportJson.addEventListener('click', exportJson);
   els.importJson.addEventListener('change', () => importJson(els.importJson.files[0]));
-  els.importTxt.addEventListener('change', () => importTxt(els.importTxt.files[0]));
+  els.importTxt.addEventListener('change', importTxt);
+  els.importGroupTxt.addEventListener('change', importGroupTxt);
+  els.importTrajectoryTxt.addEventListener('change', importTrajectoryTxt);
+  els.importDataToggle.addEventListener('click', () => setImportOptionsOpen(els.importDataOptions.hidden));
+  for (const button of document.querySelectorAll('[data-help-format]')) button.addEventListener('click', () => openHelpFormat(button.dataset.helpFormat, button));
+  els.importDialog.addEventListener('change', (event) => { if (event.target.matches('input[type="radio"]')) { showImportError(''); syncImportConfirm(); } });
+  els.importDialogConfirm.addEventListener('click', confirmImport);
+  document.getElementById('import-dialog-cancel').addEventListener('click', closeImportDialog);
+  document.getElementById('import-dialog-close').addEventListener('click', closeImportDialog);
+  document.getElementById('import-scrim').addEventListener('click', closeImportDialog);
+  for (const tab of els.helpFormatTabs) tab.addEventListener('click', () => setHelpFormat(tab.dataset.helpFormatTab));
+  els.helpFormatDownload.addEventListener('click', downloadHelpFormatExample);
   els.clearAll.addEventListener('click', clearCurrentSceneWithConfirmation);
   for (const input of Object.values(els.toggles)) {
     if (input) input.addEventListener('change', () => setOverlaysFromInputs());
@@ -2981,10 +3484,13 @@ function bindEvents() {
   document.addEventListener('keydown', handleShortcut);
 }
 
-// Escape peels back one layer; 1/2/3, Space, R and F/T/0 drive views, playback and camera.
+// Escape peels back one layer; 1/2/3, Space, R and F/T/0/P drive views, playback and camera.
 function handleShortcut(event) {
   if (event.key === 'Escape') {
+    if (importDialogOpen()) { closeImportDialog(); return; }
+    if (modelFlyoutOpen()) { closeModelFlyout(); return; }
     if (document.querySelector('.dd-btn[aria-expanded="true"]')) { closeDropdowns(); return; }
+    if (planeViewOpen()) { setPlaneViewPop(false); els.planeViewToggle.focus(); return; }
     if (colorFlyoutOpen()) { setColorFlyout(false); els.color.preview.closest('button')?.focus(); return; }
     if (!els.runLimitMenu.hidden) { setRunLimitMenuOpen(false); els.runLimitToggle.focus(); return; }
     if (state.activeModule) closeActiveModule();
@@ -3003,6 +3509,7 @@ function handleShortcut(event) {
   else if (state.activeView === 'workbench' && key === 'f') scene.setView('front');
   else if (state.activeView === 'workbench' && key === 't') scene.setView('top');
   else if (state.activeView === 'workbench' && key === '0') scene.setView('default');
+  else if (state.activeView === 'workbench' && key === 'p') { event.preventDefault(); setPlaneViewPop(!planeViewOpen(), { focus: true }); }
 }
 
 // Bottom-bar PWR / TEMP come from real backend load: the larger of frame compute time over the

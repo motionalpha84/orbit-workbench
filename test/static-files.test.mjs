@@ -102,6 +102,15 @@ test('workbench, assets, settings, and ground-track controls match the new contr
   assert.match(html, /id="simulation-start-utc" type="datetime-local"/, 'workbench should retain the UTC simulation time input');
   assert.match(html, /id="speed-factor"[\s\S]*value="86400">86400X \(1day\/s\)/, 'speed factor should include a one-day-per-second option');
   assert.match(html, /role="toolbar" aria-label="视图与图层"/, 'scene controls should live in the VIEW / LAYER toolbar');
+  assert.match(html, /id="reset-view"[^\n]*\n\s*<button id="plane-view-toggle"[^>]*aria-controls="plane-view-pop"/, 'the orbit-plane view button should close the VIEW group');
+  assert.match(html, /id="plane-view-pop" role="dialog"[\s\S]*id="plane-view-inc"[\s\S]*id="plane-view-raan"/, 'the plane view popover should take inclination and RAAN');
+  const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+  assert.ok(html.includes(`<span class="v" data-i18n-skip>v${version}</span>`), 'the top bar should show the release version');
+  assert.doesNotMatch(html, /v2\.2|VER \/\/ 2\.2/, 'no stale 2.2 version labels remain');
+  assert.match(html, /导入工作环境 JSON[\s\S]*id="import-data-toggle"[\s\S]*id="import-txt"[\s\S]*id="import-group-txt"[\s\S]*id="import-trajectory-txt"/, 'assets import splits workspace JSON from the three orbit / trajectory TXT kinds');
+  assert.match(html, /id="import-dialog"[\s\S]*name="import-body" value="earth"[\s\S]*name="import-frame" value="ECI"[\s\S]*name="import-frame" value="ECEF"/, 'the import window asks for a central body or a frame');
+  assert.match(html, /id="model-menu"[^>]*>[\s\S]*?data-model-fly="body"[\s\S]*?data-model-fly="model"[\s\S]*?<\/div>\s*<div class="dd-fly" id="body-flyout"[\s\S]*?id="dynamics-flyout"/, 'MODEL shows the current body and model with side flyouts to choose');
+  for (const id of ['hf-workspace', 'hf-elements', 'hf-group', 'hf-trajectory']) assert.match(html, new RegExp(`id="${id}" role="tabpanel"`), `help shows the ${id} import format`);
   assert.doesNotMatch(html, /id="toggle-graticule"/, 'the earth graticule is always visible in v2.2');
   assert.match(app, /graticule: true/, 'restored scenes should keep the graticule on');
   for (const id of ['toggle-axes', 'toggle-ecliptic', 'toggle-radius', 'toggle-reference']) {
@@ -281,7 +290,7 @@ test('static app wires Earth self-rotation, graticule, and TXT batch import', as
   const app = await readFile('js/app.mjs', 'utf8');
   const scene = await readFile('js/scene.mjs', 'utf8');
 
-  assert.match(app, /parseOrbitText/, 'app should parse TXT orbit batches');
+  assert.match(app, /parseOrbitFile/, 'app should parse TXT orbit batches');
   assert.match(app, /importTxt/, 'app should wire TXT import');
   assert.match(app, /els\.importTxt/, 'app should read the TXT file input');
   assert.match(scene, /EARTH_SIDEREAL_DAY_SECONDS/, 'scene should define a sidereal Earth rotation period');

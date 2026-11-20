@@ -118,6 +118,7 @@
                   <button id="front-view" class="tbtn" type="button" title="正视图 (F)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v10H3z"/><circle cx="8" cy="8" r="1.3"/></svg>正视图<kbd>F</kbd></button>
                   <button id="top-view" class="tbtn" type="button" title="俯视图 (T)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><ellipse cx="8" cy="8" rx="5.5" ry="2"/></svg>俯视图<kbd>T</kbd></button>
                   <button id="reset-view" class="tbtn" type="button" title="视角重置 (0)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 9.5A5 5 0 1 0 4.6 4.4M3.5 2v3h3"/></svg>视角重置<kbd>0</kbd></button>
+                  <button id="plane-view-toggle" class="tbtn tbtn-pop" type="button" title="轨道面视角：按倾角与升交点赤经俯视 (P)" aria-haspopup="dialog" aria-expanded="false" aria-controls="plane-view-pop"><svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="10.5" rx="6" ry="2.4" transform="rotate(-14 8 10.5)"/><path d="M8 1.5v6M5.8 5.3L8 7.5l2.2-2.2"/></svg>轨道面<kbd>P</kbd><svg class="car" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 7.5L6 4l3.5 3.5"/></svg></button>
                 </div></div>
                 <span class="tsep" aria-hidden="true"></span>
                 <!-- the graticule is always drawn; the remaining layers are toggles -->
@@ -127,6 +128,18 @@
                   <label class="chip"><input id="toggle-radius" type="checkbox" checked />赤道面</label>
                   <label class="chip" title="完整轨道淡参考"><input id="toggle-reference" type="checkbox" checked />参考轨道</label>
                 </div></div>
+              </div>
+
+              <!-- orbit-plane view: opens upward from the VIEW group, outside the clipped tools plate -->
+              <div class="plane-pop" id="plane-view-pop" role="dialog" aria-labelledby="plane-view-title" hidden>
+                <div class="dm-h" id="plane-view-title">PLANE VIEW · 轨道面视角</div>
+                <form id="plane-view-form" class="pp-form" novalidate>
+                  <p class="pp-hint">沿轨道面法向从上往下看</p>
+                  <label class="pp-f"><span class="g" aria-hidden="true">i</span><span class="l">轨道倾角</span><input id="plane-view-inc" type="number" step="any" min="0" max="180" value="0" inputmode="decimal" autocomplete="off" /><em>deg</em></label>
+                  <label class="pp-f"><span class="g" aria-hidden="true">Ω</span><span class="l">升交点赤经</span><input id="plane-view-raan" type="number" step="any" value="0" inputmode="decimal" autocomplete="off" /><em>deg</em></label>
+                  <div class="pp-err" id="plane-view-error" role="alert"></div>
+                  <div class="pp-act"><button type="button" class="btn sm" id="plane-view-from-orbit" title="填入当前选中轨道的倾角与升交点赤经">取选中轨道</button><button type="submit" class="btn sm pri">应用视角</button></div>
+                </form>
               </div>
 
               <!-- bottom-right: FRAME / MODEL / ORBITS selectors (menus open upward) -->
@@ -141,15 +154,24 @@
                       <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="false" data-frame-option="ECEF"><i></i><b>ECEF</b><small>地心地固系</small></button>
                     </div>
                   </div>
-                  <div class="dd">
+                  <!-- MODEL: the menu shows the current body and model; each row's side arrow opens a flyout to choose -->
+                  <div class="dd dd-model">
                     <button type="button" class="dd-btn" id="model-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu" title="选择中心天体与动力学模型"><span data-i18n-skip>MODEL</span><b id="body-value">地球 · 二体</b><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6l3.5 3.5L11.5 6"/></svg></button>
-                    <div class="dd-menu" id="model-menu" role="menu" aria-label="中心天体模型" hidden>
+                    <div class="dd-menu dd-sum" id="model-menu" role="menu" aria-label="中心天体与动力学模型" hidden>
+                      <div class="dm-h">CURRENT · 当前配置</div>
+                      <button type="button" class="dd-row" role="menuitem" data-model-fly="body" aria-haspopup="menu" aria-expanded="false" aria-controls="body-flyout" title="展开选择中心天体"><svg class="ar" viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg><span class="k" data-i18n-skip>BODY</span><b id="model-sum-body">地球</b><small id="model-sum-body-note" data-i18n-skip>EARTH · R 6378.137 km</small></button>
+                      <button type="button" class="dd-row" role="menuitem" data-model-fly="model" aria-haspopup="menu" aria-expanded="false" aria-controls="dynamics-flyout" title="展开选择动力学模型"><svg class="ar" viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg><span class="k" data-i18n-skip>MODEL</span><b id="model-sum-model">二体</b><small id="model-sum-model-note">无摄动（二体运动）</small></button>
+                    </div>
+                    <div class="dd-fly" id="body-flyout" role="menu" aria-label="中心天体" hidden>
                       <div class="dm-h">BODY · 中心天体</div>
-                      <button type="button" class="dd-opt status-option body-option" role="menuitemradio" aria-checked="true" data-body-option="earth"><i></i><b>地球</b><small>EARTH · R⊕ 6378.137 km</small></button>
+                      <div id="body-options" class="dd-fly-list"></div>
+                    </div>
+                    <div class="dd-fly" id="dynamics-flyout" role="menu" aria-label="动力学模型" hidden>
                       <div class="dm-h">MODEL · 动力学模型</div>
                       <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="true" data-perturbation-model="two-body"><i></i><b>二体</b><small>无摄动（二体运动）</small></button>
                       <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="false" data-perturbation-model="j2"><i></i><b>J2 摄动</b><small>含 J2 项</small></button>
                       <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="false" data-perturbation-model="j3"><i></i><b>J3 摄动</b><small>含 J2 + J3 项</small></button>
+                      <p class="dm-note" id="dynamics-note" hidden>J2 / J3 摄动仅适用于地球。</p>
                     </div>
                   </div>
                   <div class="dd">
@@ -324,14 +346,24 @@
           <div class="mb m2">
             <section>
               <div class="msec-h">轨道组 <i>ORBIT GROUPS</i><span class="sp"></span><span class="badge" id="asset-dirty-state">未保存</span></div>
-              <div class="save-row"><input id="asset-group-name" type="text" maxlength="40" placeholder="组名，例如：晨昏轨道组" aria-label="轨道组名称" autocomplete="off" /><button id="asset-save-group" class="btn pri" type="button">保存当前组</button><button id="asset-rename-group" class="btn" type="button">重命名</button></div>
+              <div class="save-row"><input id="asset-group-name" type="text" maxlength="40" placeholder="组名，留空默认 轨道组001" aria-label="轨道组名称" autocomplete="off" /><button id="asset-save-group" class="btn pri" type="button">保存当前组</button><button id="asset-rename-group" class="btn" type="button">重命名</button></div>
               <div id="asset-group-list" class="asset-group-list grp-list"></div>
             </section>
             <section>
               <div class="msec-h">导入 <i>IMPORT</i></div>
               <div class="tiles utility-actions">
-                <label class="tile sh file-button"><span class="c" data-i18n-skip>IN · JSON</span><b>导入 JSON</b><span>v1 / v2 快照或 orbits 数组</span><input id="import-json" type="file" accept="application/json" /></label>
-                <label class="tile sh file-button"><span class="c" data-i18n-skip>IN · TXT</span><b>导入 TXT</b><span>名称行 + 五或六个根数值</span><input id="import-txt" type="file" accept=".txt,text/plain" /></label>
+                <label class="tile sh file-button"><span class="c" data-i18n-skip>IN · JSON</span><b>导入工作环境 JSON</b><span>v1 / v2 快照或 orbits 数组</span><input id="import-json" type="file" accept="application/json,.json" /></label>
+                <button id="import-data-toggle" class="tile sh imp-toggle" type="button" aria-expanded="false" aria-controls="import-data-options"><span class="c" data-i18n-skip>IN · TXT</span><b>导入轨道 / 轨迹数据</b><span>六要素 · 六要素组 · 位置矢量轨迹</span><svg class="ic car" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6l3.5 3.5L11.5 6"/></svg></button>
+              </div>
+              <!-- the three TXT kinds; each opens the import window after parsing -->
+              <div class="imp-opts" id="import-data-options" role="group" aria-label="导入轨道 / 轨迹数据" hidden>
+                <div class="imp-opt"><label class="imp-pick file-button"><span class="k" data-i18n-skip>TXT · 01</span><b>导入轨道六要素</b><span>每行一条轨道：名称 a e i Ω ω ν，可选 # GROUP 组名</span><input id="import-txt" type="file" accept=".txt,text/plain" /></label><button type="button" class="imp-fmt" data-help-format="elements" title="查看格式示例">格式</button></div>
+                <div class="imp-opt"><label class="imp-pick file-button"><span class="k" data-i18n-skip>TXT · 02</span><b>导入统一六要素组</b><span>同一行格式的轨道组文件，# GROUP 指定组名</span><input id="import-group-txt" type="file" accept=".txt,.csv,text/plain" /></label><button type="button" class="imp-fmt" data-help-format="group" title="查看格式示例">格式</button></div>
+                <div class="imp-opt"><label class="imp-pick file-button"><span class="k" data-i18n-skip>TXT · 03</span><b>导入轨迹</b><span>各时刻位置矢量：t x y z（可附 vx vy vz）</span><input id="import-trajectory-txt" type="file" accept=".txt,.csv,text/plain" /></label><button type="button" class="imp-fmt" data-help-format="trajectory" title="查看格式示例">格式</button></div>
+              </div>
+              <div class="traj-sec" id="trajectory-section" hidden>
+                <div class="msec-h">已导入轨迹 <i>TRAJECTORIES</i><span class="sp"></span><span class="badge" id="trajectory-count">0</span></div>
+                <div id="trajectory-list" class="traj-list" role="list" aria-label="已导入轨迹"></div>
               </div>
               <div class="msec-h">导出 <i>EXPORT</i></div>
               <div class="tiles utility-actions">
@@ -464,6 +496,40 @@
       <div class="swatches" id="color-swatches"></div>
     </div>
 
+    <!-- ===== import window: confirm a parsed TXT and pick its central body or frame ===== -->
+    <div class="scrim import-scrim" id="import-scrim" aria-hidden="true"></div>
+    <section id="import-dialog" class="modal import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title">
+        <header class="mh"><span class="tabcode" data-i18n-skip>M-08</span><div><div class="t" id="import-dialog-title">导入确认</div><div class="s" id="import-dialog-kind" data-i18n-skip>IMPORT</div></div><button id="import-dialog-close" class="ib" type="button" aria-label="取消导入"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></header>
+        <div class="mb imp-body">
+          <section class="imp-sum">
+            <div class="msec-h">文件内容 <i>PREVIEW</i><span class="sp"></span><span class="badge" id="import-dialog-count"></span></div>
+            <div class="imp-file"><b id="import-dialog-file" data-i18n-skip></b><span id="import-dialog-meta"></span></div>
+            <div class="imp-table-wrap"><table class="imp-table" id="import-dialog-table" data-i18n-skip></table></div>
+            <canvas id="import-dialog-preview" class="imp-preview" aria-label="轨迹预览（赤道面投影，平滑曲线）" hidden></canvas>
+            <p class="imp-note" id="import-dialog-note"></p>
+          </section>
+          <section class="imp-choice">
+            <fieldset id="import-body-choice" class="imp-fs" hidden>
+              <legend class="msec-h">轨道中心天体 <i>CENTRAL BODY</i></legend>
+              <p class="imp-ask">六要素须对应一个中心天体，请选择：</p>
+              <label class="imp-card"><input type="radio" name="import-body" value="earth" /><i aria-hidden="true"></i><b>地球</b><small data-i18n-skip>EARTH · μ 398600.4418 km³/s² · R 6378.137 km</small></label>
+              <label class="imp-card is-pending"><input type="radio" name="import-body" value="moon" disabled /><i aria-hidden="true"></i><b>月球</b><small>MOON · 待后台接入</small></label>
+              <label class="imp-card is-pending"><input type="radio" name="import-body" value="mars" disabled /><i aria-hidden="true"></i><b>火星</b><small>MARS · 待后台接入</small></label>
+              <label class="imp-card is-pending"><input type="radio" name="import-body" value="sun" disabled /><i aria-hidden="true"></i><b>太阳</b><small>SUN · 待后台接入</small></label>
+            </fieldset>
+            <fieldset id="import-frame-choice" class="imp-fs" hidden>
+              <legend class="msec-h">轨迹坐标系 <i>FRAME</i></legend>
+              <p class="imp-ask">位置矢量所在的坐标系，请选择：</p>
+              <label class="imp-card"><input type="radio" name="import-frame" value="ECI" /><i aria-hidden="true"></i><b data-i18n-skip>ECI</b><small>地心惯性系（J2000）</small></label>
+              <label class="imp-card"><input type="radio" name="import-frame" value="ECEF" /><i aria-hidden="true"></i><b data-i18n-skip>ECEF</b><small>地心地固系（随地球自转）</small></label>
+              <p class="imp-ask">确认后按所选坐标系换算，并以平滑曲线绘制到工作台。</p>
+            </fieldset>
+            <div class="imp-err" id="import-dialog-error" role="alert"></div>
+            <div class="imp-act"><button id="import-dialog-cancel" class="btn" type="button">取消</button><button id="import-dialog-confirm" class="btn pri" type="button" disabled>确认导入</button></div>
+          </section>
+        </div>
+    </section>
+
     <!-- ===== help modal ===== -->
     <section id="info-modal" class="modal info-modal info-dialog" role="dialog" aria-modal="true" aria-label="说明">
         <header class="mh"><span class="tabcode" data-i18n-skip>M-07</span><div><div class="t" data-scr>说明</div><div class="s" data-i18n-skip>FIELD MANUAL · v0.2.0</div></div><button id="info-close" class="ib" type="button" aria-label="关闭说明"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></header>
@@ -481,6 +547,7 @@
               <dt><kbd>Space</kbd></dt><dd>运行 / 暂停</dd>
               <dt><kbd>R</kbd></dt><dd>重置时间至 T+0</dd>
               <dt><kbd>F</kbd> <kbd>T</kbd> <kbd>0</kbd></dt><dd>正视图 / 俯视图 / 视角重置</dd>
+              <dt><kbd>P</kbd></dt><dd>轨道面视角（按倾角与升交点赤经俯视）</dd>
               <dt><kbd>Shift</kbd>+拖拽</dt><dd>星下点框选区域统计</dd>
               <dt><kbd>Esc</kbd></dt><dd>关闭菜单 / 抽屉 / 弹窗</dd>
               <dt>双击 T+</dt><dd>循环切换 s / min / hr / day</dd>
@@ -494,6 +561,83 @@
               <dt data-i18n-skip>LEO</dt><dd>远地点高度 &lt; 2000 km</dd>
               <dt data-i18n-skip>MEO</dt><dd>其余轨道</dd>
             </dl>
+          </section>
+          <!-- import formats: one example per kind, picked with the segmented control -->
+          <section class="help-formats" id="help-formats">
+            <div class="msec-h">导入格式 <i>IMPORT FORMATS</i><span class="sp"></span><div class="seg" role="tablist" aria-label="导入格式">
+              <button type="button" role="tab" id="hf-tab-workspace" aria-controls="hf-workspace" aria-selected="true" aria-pressed="true" data-help-format-tab="workspace">工作环境 JSON</button><button type="button" role="tab" id="hf-tab-elements" aria-controls="hf-elements" aria-selected="false" aria-pressed="false" data-help-format-tab="elements">轨道六要素</button><button type="button" role="tab" id="hf-tab-group" aria-controls="hf-group" aria-selected="false" aria-pressed="false" data-help-format-tab="group">统一六要素组</button><button type="button" role="tab" id="hf-tab-trajectory" aria-controls="hf-trajectory" aria-selected="false" aria-pressed="false" data-help-format-tab="trajectory">轨迹</button>
+            </div></div>
+            <div class="hf-panel" id="hf-workspace" role="tabpanel" aria-labelledby="hf-tab-workspace" data-file="workspace-example.json">
+              <div class="hf-text">
+                <p class="hf-zh">资产 → <b>导入工作环境 JSON</b>。与「导出 JSON」互通，恢复轨道、坐标系、模型、仿真起始时刻、图层与星下点设置；也接受只含 <code data-i18n-skip>orbits</code> 数组的 JSON。导入后替换当前场景。</p>
+                <p class="hf-en" lang="en" data-i18n-skip>Assets → <b>Import workspace JSON</b>. Round-trips with “Export JSON”: restores orbits, frame, dynamics model, simulation start, layers and ground-track settings; a JSON holding only an <code>orbits</code> array also works. Importing replaces the current scene.</p>
+                <dl class="hf-fields"><dt data-i18n-skip>snapshot.orbits[]</dt><dd>轨道数组，必填；每项含名称、颜色、显隐与六要素 <code data-i18n-skip>elements</code></dd><dt data-i18n-skip>elements</dt><dd>a / km，e，i、Ω、ω、ν / °</dd><dt data-i18n-skip>centerBody</dt><dd>中心天体，当前为 <code data-i18n-skip>earth</code></dd><dt data-i18n-skip>perturbationModel</dt><dd><code data-i18n-skip>two-body</code> / <code data-i18n-skip>j2</code> / <code data-i18n-skip>j3</code></dd><dt data-i18n-skip>simulationStartUtc</dt><dd>仿真起始 UTC</dd></dl>
+              </div>
+              <pre class="hf-code" data-i18n-skip>{
+  "version": 1,
+  "snapshot": {
+    "frame": "ECI",
+    "centerBody": "earth",
+    "perturbationModel": "two-body",
+    "simulationStartUtc": "2026-10-23T06:00",
+    "orbits": [
+      {
+        "name": "LEO-01",
+        "color": "#2FB5A2",
+        "visible": true,
+        "elements": {
+          "semiMajorAxisKm": 8000,
+          "eccentricity": 0.001,
+          "inclinationDeg": 51.6,
+          "raanDeg": 40,
+          "argPeriapsisDeg": 30,
+          "trueAnomalyDeg": 0
+        }
+      }
+    ]
+  },
+  "units": { "distance": "km", "angle": "°", "time": "s" }
+}</pre>
+            </div>
+            <div class="hf-panel" id="hf-elements" role="tabpanel" aria-labelledby="hf-tab-elements" data-file="orbit-elements-example.txt" hidden>
+              <div class="hf-text">
+                <p class="hf-zh">资产 → 导入轨道 / 轨迹数据 → <b>导入轨道六要素</b>。<b>每行一条轨道</b>，列顺序固定为「名称 a e i Ω ω ν」，以空格、Tab 或逗号分隔（名称含空格时请用逗号或 Tab）；ν 可省略，按 0° 处理。<code data-i18n-skip>#</code> 开头为注释，首行可为列名表头；可选 <code data-i18n-skip># GROUP: 组名</code> 指定轨道组名称（导入后填入组名）。旧版「名称行 + 逐行数值」文件仍可导入。导入后选择<b>中心天体</b>，替换当前场景。</p>
+                <p class="hf-en" lang="en" data-i18n-skip>Assets → Import orbit / trajectory data → <b>Import orbit elements</b>. <b>One orbit per line</b> in the fixed column order “name a e i Ω ω ν”, separated by spaces, tabs or commas (use commas or tabs when names contain spaces); ν may be left out (0°). Lines starting with <code>#</code> are comments and the first line may be a column header; an optional <code># GROUP: name</code> names the orbit group (filled in after import). Files in the earlier layout (a name line, then one value per line) still import. After parsing, choose the <b>central body</b>; the orbits replace the current scene.</p>
+                <dl class="hf-fields"><dt>列 1</dt><dd>轨道名称（不能是纯数字）</dd><dt>列 2–7</dt><dd>a / km，e，i / °，Ω / °，ω / °，ν / °（ν 可省略）</dd></dl>
+              </div>
+              <pre class="hf-code" data-i18n-skip># GROUP: 轨道组001
+# name       a(km)   e       i(°)   Ω(°)   ω(°)   ν(°)
+LEO-01       8000    0.001   51.6   40     30     0
+MOLNIYA-02   26560   0.72    63.4   120    270    10
+GEO-03       42164   0.0002  0.05   0      0      75</pre>
+            </div>
+            <div class="hf-panel" id="hf-group" role="tabpanel" aria-labelledby="hf-tab-group" data-file="element-group-example.txt" hidden>
+              <div class="hf-text">
+                <p class="hf-zh">资产 → 导入轨道 / 轨迹数据 → <b>导入统一六要素组</b>。行格式与「轨道六要素」相同：<b>每行一条轨道</b>「名称 a e i Ω ω ν」，以空格、Tab 或逗号分隔；另用 <code data-i18n-skip># GROUP: 组名</code> 指定轨道组名称。导入后选择<b>中心天体</b>，替换当前场景并填入组名。</p>
+                <p class="hf-en" lang="en" data-i18n-skip>Assets → Import orbit / trajectory data → <b>Import element group</b>. Same line format as “orbit elements”: <b>one orbit per line</b>, “name a e i Ω ω ν”, separated by spaces, tabs or commas; additionally <code># GROUP: name</code> names the group. After parsing, choose the <b>central body</b>; the orbits replace the current scene and the group name is filled in.</p>
+                <dl class="hf-fields"><dt>列 1</dt><dd>轨道名称</dd><dt>列 2–7</dt><dd>a / km，e，i / °，Ω / °，ω / °，ν / °（ν 可省略）</dd></dl>
+              </div>
+              <pre class="hf-code" data-i18n-skip># GROUP: 轨道组001
+# name   a(km)     e       i(°)   Ω(°)   ω(°)  ν(°)
+SSO-01   7078.137  0.0010  98.19  100.0  90.0  0.0
+SSO-02   7078.137  0.0010  98.19  100.0  90.0  120.0
+SSO-03   7078.137  0.0010  98.19  100.0  90.0  240.0</pre>
+            </div>
+            <div class="hf-panel" id="hf-trajectory" role="tabpanel" aria-labelledby="hf-tab-trajectory" data-file="trajectory-example.txt" hidden>
+              <div class="hf-text">
+                <p class="hf-zh">资产 → 导入轨道 / 轨迹数据 → <b>导入轨迹</b>。<b>每行一个时刻</b>的位置矢量「t x y z」，单位 km；可追加速度「vx vy vz」（km/s），平滑曲线将同时吻合位置与速度。时间 <code data-i18n-skip>t</code> 为相对仿真起始的秒数，或 ISO 8601 UTC（如 <code data-i18n-skip>2026-10-23T06:00:00Z</code>），须严格递增。<code data-i18n-skip># NAME: 名称</code> 开始一条新轨迹，一个文件可含多条。导入后选择<b>坐标系</b>（ECI / ECEF），并以平滑曲线绘制。</p>
+                <p class="hf-en" lang="en" data-i18n-skip>Assets → Import orbit / trajectory data → <b>Import trajectory</b>. <b>One epoch per line</b>: position “t x y z” in km, optionally followed by velocity “vx vy vz” in km/s so the smooth curve matches velocity as well. <code>t</code> is seconds from the simulation start or an ISO 8601 UTC stamp (e.g. <code>2026-10-23T06:00:00Z</code>) and must strictly increase. <code># NAME: name</code> starts a new trajectory, so one file may hold several. After parsing, choose the <b>frame</b> (ECI / ECEF); the trajectory is drawn as a smooth curve.</p>
+                <dl class="hf-fields"><dt>列 1</dt><dd>时间：秒或 UTC</dd><dt>列 2–4</dt><dd>位置 x y z / km</dd><dt>列 5–7</dt><dd>速度 vx vy vz / km/s（可选，整条轨迹统一）</dd></dl>
+              </div>
+              <pre class="hf-code" data-i18n-skip># NAME: TRJ-01
+# t(s)    x(km)        y(km)        z(km)
+0         7000.000     0.000        0.000
+60        6985.363     281.037      354.580
+120       6941.512     560.898      707.678
+180       6868.631     838.414      1057.815
+240       6767.024     1112.423     1403.529</pre>
+            </div>
+            <div class="hf-act"><button type="button" class="btn sm" id="help-format-download">下载此示例</button></div>
           </section>
         </div>
     </section>

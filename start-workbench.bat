@@ -4,7 +4,7 @@ setlocal
 set "APP_DIR=%~dp0"
 cd /d "%APP_DIR%"
 
-if not defined PORT set "PORT=4173"
+if not defined PORT set "PORT=4174"
 if not defined OPEN_BROWSER set "OPEN_BROWSER=1"
 set "HOST=127.0.0.1"
 set "URL=http://%HOST%:%PORT%"
@@ -25,13 +25,13 @@ if exist "%BUNDLED_NODE%" (
 )
 
 echo.
-echo ECI Orbit Workbench
+echo Orbit Workbench v0.2.0
 echo URL: %URL%
 echo Press Ctrl+C to stop the server.
 echo.
 
 if not "%OPEN_BROWSER%"=="0" (
-  start "" /min powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Milliseconds 800; Start-Process '%URL%'"
+  start "" /b powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Milliseconds 800; Start-Process '%URL%'"
 )
 "%NODE_EXE%" server.mjs
 set "EXIT_CODE=%ERRORLEVEL%"
@@ -44,3 +44,4 @@ if not "%EXIT_CODE%"=="0" (
 )
 pause
 exit /b %EXIT_CODE%
+

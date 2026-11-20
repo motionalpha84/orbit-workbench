@@ -1,10 +1,12 @@
 import {
-  computeOrbit,
   formatDuration,
   formatNumber,
-  propagateOrbit,
 } from './orbit.mjs';
-import { OrbitScene, orbitReferenceSampleCount } from './scene.mjs';
+import { BackendClient } from './backend-client.mjs';
+import { WireRecordCache } from './wire-records.mjs';
+import { pageRecords } from './list-pagination.mjs';
+import { renderTaskTable } from './task-table.mjs';
+import { SchematicScene } from './schematic-scene.mjs';
 import {
   DEFAULT_ORBIT_COLORS,
   hexToRgb,
@@ -15,21 +17,32 @@ import {
 import { parseOrbitText } from './importers.mjs';
 import {
   groundTrackBudget,
+  groundTrackCsv,
   groundTrackRegionStats,
   utcMsFromInput,
 } from './groundtrack.mjs';
-import {
-  groundTrackTrackFromHistory,
-  pruneGroundTrackHistory,
-  updateGroundTrackHistory,
-} from './groundtrack-history.mjs';
 import { GroundTrackView, formatUtc } from './groundtrack-view.mjs';
-import { calibrateOrbitVectorTargets, parseCalibrationVector } from './vector-calibration.mjs';
+import { parseCalibrationVector } from './vector-calibration.mjs';
+import { classifyOrbitRecord, ORBIT_CLASSES } from './orbit-class.mjs';
+import { initI18n, tr } from './i18n.mjs';
+import {
+  RM, VIEW_MS, closeDropdowns, colorFlyoutOpen, dropIn, initColorFlyout, initDropdowns, initListFades,
+  initMotes, initPanelToggles, initSegmentedSelects, isSwitching, markSwatch, refreshListFades, rollSet, scramble,
+  setColorFlyout, shutter, syncSegmentedSelects,
+} from './ui-shell.mjs';
 
 const STORAGE_KEY = 'eci-orbit-workbench:v1';
 const ASSET_LIBRARY_KEY = 'eci-orbit-workbench:asset-groups:v1';
-const SIDE_MODULES = new Set(['workbench', 'assets', 'settings']);
-const BOTTOM_MODULES = new Set(['groundTrack', 'console']);
+// Three persistent views share the stage; drawers (and the help modal) open over them.
+const VIEW_MODULES = ['workbench', 'groundTrack', 'console'];
+const DRAWER_MODULES = new Set(['assets', 'calibration', 'settings']);
+const FRAME_RATE_LIMITS = [30, 60, 120, 0]; // 0 follows the display refresh rate
+const VIEW_META = {
+  workbench: ['轨道工作台', 'ORBIT DECK'],
+  groundTrack: ['星下点分析', 'GROUND TRACK'],
+  console: ['计算任务', 'COMPUTE QUEUE'],
+};
+const LIGHT_MAP_SRC = './assets/maps/firefly-world-map.svg';
 
 const els = {
   body: document.body,
@@ -38,14 +51,21 @@ const els = {
   moduleButtons: Array.from(document.querySelectorAll('[data-module-nav]')),
   modulePanels: Array.from(document.querySelectorAll('[data-module-panel]')),
   modulePinButtons: Array.from(document.querySelectorAll('[data-module-pin]')),
+  views: Array.from(document.querySelectorAll('[data-view]')),
+  deckCanvasSlot: document.querySelector('#deck-canvas-slot'),
+  miniCanvas: document.querySelector('#mini-canvas'),
+  groundTrackCount: document.querySelector('#ground-track-count'),
+  trackCanvasSlot: document.querySelector('#track-canvas-slot'),
   workbench: document.querySelector('#workbench'),
-  pinWorkbench: document.querySelector('#pin-workbench'),
-  closeDrawer: document.querySelector('#close-drawer'),
   form: document.querySelector('#orbit-form'),
+  editBanner: document.querySelector('#edit-banner'),
+  editName: document.querySelector('#edit-name'),
+  editCancel: document.querySelector('#edit-cancel'),
   submitButton: document.querySelector('#submit-button'),
   clearForm: document.querySelector('#clear-form'),
   formErrors: document.querySelector('#form-errors'),
   orbitList: document.querySelector('#orbit-list'),
+  orbitLists: Array.from(document.querySelectorAll('.js-orbit-list')),
   orbitCount: document.querySelector('#orbit-count'),
   orbitListCount: document.querySelector('#orbit-list-count'),
   frameValue: document.querySelector('#frame-value'),
@@ -53,7 +73,18 @@ const els = {
   statusOrbitMenu: document.querySelector('#status-orbit-menu'),
   orbitTooltip: document.querySelector('#orbit-tooltip'),
   selectedOrbitName: document.querySelector('#selected-orbit-name'),
-  metrics: document.querySelector('#metrics'),
+  selectedOrbitHud: document.querySelector('#selected-orbit-hud'),
+  selectedOrbitCode: document.querySelector('#selected-orbit-code'),
+  selectedOrbitMulti: document.querySelector('#selected-orbit-multi'),
+  selectedOrbitClass: document.querySelector('#selected-orbit-class'),
+  selectedOrbitPeriodCell: document.querySelector('#selected-orbit-period-cell'),
+  selectedOrbitPeriod: document.querySelector('#selected-orbit-period'),
+  selectedOrbitPeriodUnit: document.querySelector('#selected-orbit-period-unit'),
+  selectedOrbitPeriapsis: document.querySelector('#selected-orbit-periapsis'),
+  selectedOrbitApoapsis: document.querySelector('#selected-orbit-apoapsis'),
+  selectedOrbitSpeed: document.querySelector('#selected-orbit-speed'),
+  stateVectorName: document.querySelector('#state-vector-name'),
+  stateVector: ['px', 'py', 'pz', 'vx', 'vy', 'vz'].map((key) => document.querySelector(`#state-${key}`)),
   emptyState: document.querySelector('#empty-state'),
   playToggle: document.querySelector('#play-toggle'),
   runLimitToggle: document.querySelector('#run-limit-toggle'),
@@ -67,6 +98,12 @@ const els = {
   speedFactor: document.querySelector('#speed-factor'),
   timeReadoutPanel: document.querySelector('.simulation-time-panel'),
   timeReadout: document.querySelector('#time-readout'),
+  timeReadoutUnit: document.querySelector('#time-readout-unit'),
+  runLimitValue: document.querySelector('#run-limit-value'),
+  clockUtc: document.querySelector('#clock-utc'),
+  telemetryFrame: document.querySelector('#telem-frame'),
+  telemetryPower: document.querySelector('#telem-power'),
+  telemetryTemp: document.querySelector('#telem-temp'),
   screenshotButton: document.querySelector('#screenshot-button'),
   calibrationTargetEditor: document.querySelector('#calibration-target-editor'),
   calibrationEditorError: document.querySelector('#calibration-editor-error'),
@@ -79,6 +116,9 @@ const els = {
   calibrationResults: document.querySelector('#calibration-results'),
   simulationStartUtc: document.querySelector('#simulation-start-utc'),
   groundTrackPanel: document.querySelector('#ground-track-panel'),
+  groundTrackClosed: document.querySelector('#ground-track-closed'),
+  groundTrackReopen: document.querySelector('#ground-track-reopen'),
+  groundTrackStatsPanel: document.querySelector('#ground-track-stats-panel'),
   groundTrackModeToggle: document.querySelector('#ground-track-mode-toggle'),
   groundTrackMinimize: document.querySelector('#ground-track-minimize'),
   groundTrackClose: document.querySelector('#ground-track-close'),
@@ -99,6 +139,11 @@ const els = {
   groundTrackCursorGuides: document.querySelector('#ground-track-cursor-guides'),
   performanceMode: document.querySelector('#ground-track-performance-mode'),
   customMemory: document.querySelector('#ground-track-custom-memory'),
+  customMemoryValue: document.querySelector('#custom-memory-value'),
+  customMemoryGrid: document.querySelector('#custom-memory-grid'),
+  performanceHint: document.querySelector('#performance-hint'),
+  frameRateLimit: document.querySelector('#frame-rate-limit'),
+  frameRateValue: document.querySelector('#frame-rate-value'),
   exportNamePrefix: document.querySelector('#export-name-prefix'),
   exportGroundTrackPng: document.querySelector('#export-ground-track-png'),
   assetDirtyState: document.querySelector('#asset-dirty-state'),
@@ -108,8 +153,8 @@ const els = {
   assetGroupList: document.querySelector('#asset-group-list'),
   infoModal: document.querySelector('#info-modal'),
   infoClose: document.querySelector('#info-close'),
+  moduleScrim: document.querySelector('#module-scrim'),
   consolePanel: document.querySelector('#console-panel'),
-  consoleClose: document.querySelector('#console-close'),
   exitPage: document.querySelector('#exit-page'),
   exportJson: document.querySelector('#export-json'),
   importJson: document.querySelector('#import-json'),
@@ -117,7 +162,6 @@ const els = {
   clearAll: document.querySelector('#clear-all'),
   toggles: {
     axes: document.querySelector('#toggle-axes'),
-    graticule: document.querySelector('#toggle-graticule'),
     ecliptic: document.querySelector('#toggle-ecliptic'),
     radius: document.querySelector('#toggle-radius'),
     reference: document.querySelector('#toggle-reference'),
@@ -129,14 +173,27 @@ const els = {
     b: document.querySelector('[name="colorB"]'),
     hex: document.querySelector('[name="colorHex"]'),
     preview: document.querySelector('#color-preview'),
+    hexLabel: document.querySelector('#color-hex-label'),
+    flyoutSwatch: document.querySelector('#color-flyout-swatch'),
+    flyoutHex: document.querySelector('#color-flyout-hex'),
   },
 };
 
-const scene = new OrbitScene(els.canvas);
+// The approved Firefly schematic draws both the workbench stage and the ground-track viewport.
+// `?renderer=webgl` keeps the v2.1 Three.js scene available (one canvas moved between slots).
+const useWebGlScene = new URLSearchParams(location.search).get('renderer') === 'webgl';
+const scene = useWebGlScene
+  ? new (await import('./scene.mjs')).OrbitScene(els.canvas, { theme: 'light' })
+  : new SchematicScene(els.canvas);
+const miniScene = useWebGlScene ? null : new SchematicScene(els.miniCanvas, { mini: true, source: scene });
+if (useWebGlScene) els.miniCanvas?.remove();
 const groundTrackView = new GroundTrackView({
   canvas: els.groundTrackCanvas,
   tooltip: els.groundTrackTooltip,
   selectionSummary: els.groundTrackSelectionSummary,
+  mapSrc: LIGHT_MAP_SRC,
+  theme: 'light',
+  readout: document.querySelector('#ground-track-readout'),
 });
 
 let calibrationTargetSequence = 1;
@@ -182,16 +239,14 @@ const state = {
   selectedId: null,
   editingId: null,
   isPlaying: false,
-  activeModule: 'workbench',
-  committedModule: 'workbench',
+  activeView: 'workbench',
+  activeModule: null,
+  committedModule: null,
   previewModule: null,
   previewReturnModule: null,
   modulePins: {
-    workbench: true,
-    groundTrack: false,
     assets: false,
-    info: false,
-    console: false,
+    calibration: false,
     settings: false,
   },
   hoverPreviewTimer: null,
@@ -218,11 +273,11 @@ const state = {
   },
   performanceMode: 'high',
   customMemoryGb: 8,
+  frameRateLimit: 60,
   exportNamePrefix: 'ground-track',
   assetGroups: [],
   currentAssetId: null,
   isSceneDirty: false,
-  groundTrackHistories: new Map(),
   groundTrackTracks: [],
   lastGroundTrackRenderMs: 0,
   calibrationDraftTarget: createCalibrationDraftTarget(),
@@ -238,11 +293,228 @@ const state = {
   overlays: {
     axes: true,
     graticule: true,
-    ecliptic: true,
+    ecliptic: false,
     radius: true,
     reference: true,
   },
 };
+
+let workspaceOperation = 0;
+let calibrationOperation = 0;
+let frameRevision = 0;
+let frameDirty = true;
+let framePending = false;
+let frameLastRequestedAt = 0;
+let frameRetryAt = 0;
+let referencePending = false;
+let groundResetToken = 0;
+const groundResetIds = new Set();
+const backendSessionId = uuid();
+let computedStates = new Map();
+let persistenceReady = false;
+let historyLimitNotified = false;
+const backend = new BackendClient({ onChange: renderBackendStatus });
+const wireCache = new WireRecordCache();
+const wireRecords = () => wireCache.get(state.orbits);
+let saveTimer = null;
+let savePending = false;
+
+function renderBackendStatus(client = backend) {
+  const set = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+  const jobs = [...client.jobs.values()];
+  const active = jobs.filter((job) => ['queued', 'running'].includes(job.status));
+  const current = active[0] ?? jobs.at(-1);
+  const progress = current ? Math.round((Number(current.progress) || 0) * (Number(current.progress) <= 1 ? 100 : 1)) : 0;
+  set('backend-status-text', client.connected ? 'LINK · NODE_01' : 'LINK LOST · 计算服务未连接');
+  set('ops-link-state', client.connected ? 'ONLINE' : 'OFFLINE');
+  document.getElementById('stat-connection')?.classList.toggle('off', !client.connected);
+  set('backend-detail', client.connected ? '本机后台 · 独立计算线程' : client.error || '正在连接本机计算服务…');
+  const health = client.health ?? {};
+  const roll = (id, value) => { const element = document.getElementById(id); if (element) rollSet(element, String(value)); };
+  const workers = Number(health.workers ?? health.pool?.size);
+  roll('backend-worker-count', Number.isFinite(workers) ? workers : '—');
+  roll('backend-queue-count', String(health.queued ?? active.filter((job) => job.status === 'queued').length).padStart(2, '0'));
+  roll('queue-running', String(health.running ?? active.filter((job) => job.status === 'running').length).padStart(2, '0'));
+  roll('queue-completed', String(health.completed ?? jobs.filter((job) => job.status === 'completed').length).padStart(2, '0'));
+  roll('queue-failed', String(health.failed ?? jobs.filter((job) => job.status === 'failed').length).padStart(2, '0'));
+  renderWorkerSlots(Number.isFinite(workers) ? workers : 0, jobs.filter((job) => job.status === 'running'));
+  set('backend-job-label', current?.label ?? '就绪，等待计算任务');
+  set('backend-job-percent', `${progress}%`);
+  set('backend-job-sub', current ? `${current.type ?? ''} · ${String(current.id ?? '').slice(0, 8)}` : '—');
+  const bar = document.getElementById('backend-job-progress');
+  if (bar) bar.value = progress;
+  const cancel = document.getElementById('backend-cancel');
+  if (cancel) cancel.disabled = active.length === 0;
+  const status = document.getElementById('backend-status');
+  if (status) {
+    status.dataset.state = client.connected ? 'online' : 'offline';
+    status.classList.toggle('off', !client.connected);
+  }
+  const list = document.getElementById('backend-jobs');
+  const labels = { queued: '排队', running: '计算中', completed: '完成', failed: '失败', cancelled: '已取消', canceled: '已取消' };
+  if (list) list.innerHTML = jobs.slice(-5).reverse().map((job) => `<div class="backend-job-row"><span>${escapeHtml(job.label)}</span><small>${labels[job.status] ?? escapeHtml(job.status)}</small></div>`).join('') || '<span class="backend-idle">计算结果将在此显示</span>';
+  renderConsole(client.logs);
+  renderTaskTable(client);
+}
+
+// Worker slots: one cell per backend thread, filled by running jobs in order with their progress.
+function renderWorkerSlots(count, running) {
+  const box = document.getElementById('worker-slots');
+  if (!box) return;
+  const slots = Math.max(1, Math.min(16, count || 1));
+  if (box.children.length !== slots) {
+    box.replaceChildren(...Array.from({ length: slots }, (_, index) => {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      slot.innerHTML = `<span>W${String(index + 1).padStart(2, '0')}</span><b>IDLE</b>`;
+      return slot;
+    }));
+  }
+  [...box.children].forEach((slot, index) => {
+    const job = running[index];
+    slot.classList.toggle('busy', Boolean(job));
+    slot.style.setProperty('--p', job ? `${Math.round((Number(job.progress) || 0) * 100)}%` : '0%');
+    const label = slot.querySelector('b');
+    const text = job ? `${Math.round((Number(job.progress) || 0) * 100)}%` : 'IDLE';
+    if (label.textContent !== text) label.textContent = text;
+  });
+}
+
+// Console: oldest first, timestamp · tag · message, newest line types in and stays in view.
+const consoleSeen = new Set();
+function renderConsole(logs = []) {
+  const box = document.getElementById('backend-log');
+  if (!box) return;
+  if (!logs.length) { box.textContent = '计算服务初始化中…'; return; }
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+  const lines = [...logs].reverse().map((entry) => {
+    const match = /^(\S+)\s+(.*)$/.exec(entry) ?? [null, '', entry];
+    const message = match[2];
+    const kind = /失败|错误|中断|超时|error/i.test(message) ? 'err' : /暂停|裁剪|重置|取消/.test(message) ? 'warn' : '';
+    const tag = kind === 'err' ? 'ERROR' : kind === 'warn' ? 'WARN' : /已完成/.test(message) ? 'DONE' : /已提交/.test(message) ? 'SUBMIT' : 'INFO';
+    const fresh = !consoleSeen.has(entry);
+    consoleSeen.add(entry);
+    return `<div class="ln${kind ? ` ${kind}` : ''}${fresh ? ' new' : ''}"><span class="ts" data-i18n-skip>${escapeHtml(match[1])}</span> <span class="tag" data-i18n-skip>[${tag}]</span> <span>${escapeHtml(message)}</span></div>`;
+  });
+  box.innerHTML = `${lines.join('')}<span class="caret" aria-hidden="true"></span>`;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function invalidateComputedFrame() {
+  frameRevision += 1;
+  frameDirty = true;
+  computedStates.clear();
+  scene.setComputedFrame(null);
+}
+
+async function ensureBackendReferences() {
+  const limit = currentGroundTrackBudget().max3dReferenceSamples;
+  if (referencePending || !state.orbits.some((record) => record.referenceModel !== state.perturbationModel || record.referenceLimit !== limit)) return;
+  referencePending = true;
+  const records = state.orbits;
+  const model = state.perturbationModel;
+  const operation = workspaceOperation;
+  let superseded = false;
+  invalidateComputedFrame();
+  for (const record of records) {
+    if (record.referenceModel !== model) record.reference = [];
+  }
+  scene.syncOrbits(records, model);
+  try {
+    const prepared = await backend.run('prepare', {
+      records: records.map(serializeOrbit), perturbationModel: model,
+      referenceSampleCount: limit,
+    }, `更新 ${model.toUpperCase()} 参考轨道`);
+    if (state.orbits !== records || state.perturbationModel !== model || operation !== workspaceOperation || limit !== currentGroundTrackBudget().max3dReferenceSamples) {
+      superseded = true;
+      return;
+    }
+    const byId = new Map(prepared.records.map((record) => [record.id, record]));
+    for (const record of records) {
+      Object.assign(record, byId.get(record.id), { referenceModel: model, referenceLimit: limit });
+    }
+    scene.syncOrbits(state.orbits, model);
+    frameDirty = true;
+  } catch (error) { showErrors(error.message); }
+  finally {
+    referencePending = false;
+    if (superseded) ensureBackendReferences();
+  }
+}
+
+// Backend frames are fetched at the target frame rate so positions advance every painted frame;
+// large constellations cost more per frame, so their fetch rate is capped to keep the backend responsive.
+function computedFrameInterval() {
+  const target = state.frameRateLimit > 0 ? 1000 / state.frameRateLimit : 1000 / 120;
+  const floor = state.orbits.length > 500 ? 100 : state.orbits.length > 100 ? 33 : 0;
+  return Math.max(target, floor);
+}
+
+async function requestComputedFrame(nowMs) {
+  if (framePending || referencePending || nowMs < frameRetryAt || state.orbits.length === 0) return;
+  const interval = computedFrameInterval();
+  // 2 ms slack: display refreshes land a hair under the interval and would otherwise skip every other fetch
+  if ((!state.isPlaying && !frameDirty) || nowMs - frameLastRequestedAt < interval - 2) return;
+  const delta = state.isPlaying ? Math.min(0.5, Math.max(0, (nowMs - Math.max(frameLastRequestedAt, state.runStartedAtMs ?? nowMs)) / 1000)) : 0;
+  const elapsedSeconds = state.elapsedSeconds + delta * state.speedFactor;
+  const revision = frameRevision;
+  const spacing = Math.max(interval, nowMs - frameLastRequestedAt);
+  frameLastRequestedAt = nowMs;
+  framePending = true;
+  frameDirty = false;
+  const resetIds = [...groundResetIds];
+  const budget = currentGroundTrackBudget();
+  const activeRecords = state.groundTrackPanel === 'closed' ? [] : activeGroundTrackRecords(budget);
+  try {
+    const result = await backend.frame({
+      records: wireRecords(), elapsedSeconds,
+      perturbationModel: state.perturbationModel,
+      trailCount: state.orbits.length > 500 ? 32 : state.orbits.length > 100 ? 64 : 130,
+      ...(state.groundTrackPanel !== 'closed' ? { groundTrack: {
+        sessionId: backendSessionId, resetToken: groundResetToken, resetIds,
+        startUtcMs: utcMsFromInput(state.simulationStartUtc, Date.now()),
+        activeIds: activeRecords.map((record) => record.id), window: currentGroundTrackWindow(),
+        referenceSampleCount: budget.max3dReferenceSamples,
+        maxCatchUpPoints: Math.min(2000, Math.max(60, Math.floor(budget.maxGroundTrackSamples / Math.max(1, activeRecords.length)))),
+      } } : {}),
+    });
+    if (revision !== frameRevision) { frameDirty = true; return; }
+    state.elapsedSeconds = result.elapsedSeconds;
+    computedStates = new Map(result.records.map((record) => [record.id, record.state]));
+    scene.setComputedFrame(result);
+    if (result.tracks) {
+      if (result.groundTrack?.reset && state.groundTrackTracks.some((track) => (track.points?.length ?? 0) > 1)) {
+        backend.log('地图历史已重新开始记录：后台会话已重置。');
+      }
+      if (result.groundTrack?.truncated && !historyLimitNotified) {
+        backend.log('地图历史已达到内存预算，最早采样点已裁剪。');
+      }
+      historyLimitNotified = Boolean(result.groundTrack?.truncated);
+      state.groundTrackTracks = result.tracks;
+      resetIds.forEach((id) => groundResetIds.delete(id));
+      renderGroundTrack({ force: true });
+    }
+    renderMetrics();
+    updateTimeReadout();
+    const latency = Math.round(performance.now() - nowMs);
+    computeLoad.frame = Math.min(1, latency / spacing);
+    computeLoad.frameAt = performance.now();
+    const detail = document.getElementById('backend-detail');
+    if (detail) detail.textContent = `本机计算 · ${state.orbits.length} 条轨道 · ${latency} ms`;
+  } catch (error) {
+    frameDirty = true;
+    frameRetryAt = performance.now() + 2000;
+    state.isPlaying = false;
+    state.runStartedAtMs = null;
+    backend.log(`播放已暂停 · ${error.message}`);
+    await backend.checkHealth();
+    showErrors(`计算连接中断：${error.message}。恢复服务后将自动重试。`);
+    renderUi();
+  } finally { framePending = false; }
+}
 
 function uuid() {
   if (crypto?.randomUUID) return crypto.randomUUID();
@@ -284,12 +556,36 @@ function groundTrackTimeValue(seconds, unit) {
 
 function formatSimulationTimeReadout(seconds, unit = state.timeReadoutUnit) {
   const normalizedUnit = normalizeTimeUnit(unit);
-  const value = Math.round((Number(seconds) || 0) / TIME_UNIT_SECONDS[normalizedUnit]);
-  return `${value.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} ${normalizedUnit}`;
+  const value = Math.max(0, Number(seconds) || 0) / TIME_UNIT_SECONDS[normalizedUnit];
+  return `T+ ${value.toFixed(1).padStart(7, '0')} ${normalizedUnit}`;
 }
 
 function updateTimeReadout() {
-  els.timeReadout.textContent = formatSimulationTimeReadout(state.elapsedSeconds);
+  // "T+ 00034.0 s" renders as key / value / unit parts in the bottom-bar readout plate
+  const [, value, unit] = formatSimulationTimeReadout(state.elapsedSeconds).split(' ');
+  if (els.timeReadout.textContent !== value) els.timeReadout.textContent = value;
+  if (els.timeReadoutUnit.textContent !== unit) els.timeReadoutUnit.textContent = unit;
+  els.timeReadout.dataset.elapsedSeconds = String(state.elapsedSeconds);
+  updateUtcClock();
+  const slider = document.getElementById('timeline-scrubber');
+  if (slider && document.activeElement !== slider) {
+    const period = selectedOrbitRecord()?.orbit?.periodSeconds || 6000;
+    const end = Math.max(period, Math.ceil((state.elapsedSeconds + 1) / period) * period);
+    slider.max = String(Math.ceil(end));
+    slider.value = String(state.elapsedSeconds);
+    slider.disabled = !state.orbits.length;
+    const range = document.getElementById('timeline-range-label');
+    if (range) range.textContent = `0 — ${Math.ceil(end).toLocaleString()} s`;
+  }
+  if (slider) slider.style.setProperty('--timeline-progress', `${Math.min(100, Math.max(0, Number(slider.value) / Number(slider.max) * 100))}%`);
+}
+
+// Bottom-bar UTC: the simulation epoch advanced by the elapsed simulation time.
+function updateUtcClock() {
+  if (!els.clockUtc) return;
+  const startMs = utcMsFromInput(state.simulationStartUtc, Date.now());
+  const value = Number.isFinite(startMs) ? formatUtc(startMs + state.elapsedSeconds * 1000) : '—';
+  if (els.clockUtc.textContent !== value) els.clockUtc.textContent = value;
 }
 
 function cycleSimulationTimeUnit() {
@@ -332,16 +628,32 @@ function serializeWorkbenchSnapshot() {
   };
 }
 
-function buildOrbitRecordsFromSerialized(orbits = []) {
-  return orbits.map((item, index) => buildOrbitRecord(item.elements ?? item, {
+async function buildOrbitRecordsFromSerialized(orbits = [], model = state.perturbationModel) {
+  if (!orbits.length) return [];
+  const records = orbits.map((item, index) => ({
     id: item.id ?? uuid(),
-    color: item.color ?? nextOrbitColor(index),
+    name: String(item.name ?? item.elements?.name ?? `Orbit ${index + 1}`).trim(),
+    elements: item.elements ?? item,
+    color: normalizeHexColor(item.color, nextOrbitColor(index)),
     visible: item.visible !== false,
   }));
+  const limit = currentGroundTrackBudget().max3dReferenceSamples;
+  const prepared = await backend.run('prepare', {
+    records, perturbationModel: model, referenceSampleCount: limit,
+  }, `轨道准备 · ${records.length} 条`);
+  const byId = new Map(prepared.records.map((item) => [item.id, item]));
+  return records.map((record) => ({ ...record, ...byId.get(record.id), referenceModel: model, referenceLimit: limit }));
 }
 
-function applyWorkbenchSnapshot(snapshot = {}) {
-  state.orbits = buildOrbitRecordsFromSerialized(snapshot.orbits ?? []);
+async function applyWorkbenchSnapshot(snapshot = {}) {
+  const version = ++workspaceOperation;
+  const records = await buildOrbitRecordsFromSerialized(snapshot.orbits ?? [], snapshot.perturbationModel ?? state.perturbationModel);
+  if (version !== workspaceOperation) throw new Error('场景已更新，忽略过期导入。');
+  state.orbits = records;
+  persistenceReady = true;
+  state.isPlaying = false;
+  state.runStartedAtMs = null;
+  state.elapsedSeconds = 0;
   setSelectedOrbitIds(
     Array.isArray(snapshot.selectedIds) ? snapshot.selectedIds : snapshot.selectedId ? [snapshot.selectedId] : [],
     { currentId: snapshot.selectedId, defaultFirst: true },
@@ -354,7 +666,8 @@ function applyWorkbenchSnapshot(snapshot = {}) {
   }
   if (typeof snapshot.simulationStartUtc === 'string') state.simulationStartUtc = snapshot.simulationStartUtc;
   if (snapshot.overlays && typeof snapshot.overlays === 'object') {
-    state.overlays = { ...state.overlays, ...snapshot.overlays };
+    // V2.2 keeps the earth graticule permanently visible
+    state.overlays = { ...state.overlays, ...snapshot.overlays, graticule: true };
   }
   if (snapshot.groundTrackFilters && typeof snapshot.groundTrackFilters === 'object') {
     state.groundTrackFilters = { ...snapshot.groundTrackFilters };
@@ -408,14 +721,18 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function metricRow(label, value, unit = '') {
-  const content = unit
-    ? `<dd class="metrics-value"><span>${value}</span><span class="metrics-unit">${unit}</span></dd>`
-    : `<dd>${value}</dd>`;
-  return `<div><dt>${label}</dt>${content}</div>`;
+function saveState() {
+  if (!persistenceReady) return;
+  savePending = true;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSavedState, 250);
 }
 
-function saveState() {
+function flushSavedState() {
+  clearTimeout(saveTimer);
+  if (!savePending) return;
+  savePending = false;
+  if (!persistenceReady) return;
   const payload = {
     version: 2,
     selectedIds: [...state.selectedIds],
@@ -423,6 +740,7 @@ function saveState() {
     frame: state.frame,
     centerBody: state.centerBody,
     perturbationModel: state.perturbationModel,
+    activeView: state.activeView,
     activeModule: state.committedModule,
     modulePins: state.modulePins,
     overlays: state.overlays,
@@ -433,36 +751,50 @@ function saveState() {
     groundTrackOptions: state.groundTrackOptions,
     performanceMode: state.performanceMode,
     customMemoryGb: state.customMemoryGb,
+    frameRateLimit: state.frameRateLimit,
     exportNamePrefix: state.exportNamePrefix,
     currentAssetId: state.currentAssetId,
     isSceneDirty: state.isSceneDirty,
-    orbits: state.orbits.map(serializeOrbit),
+    taskTableOpen: Boolean(document.getElementById('task-table')?.open),
+    orbits: wireRecords(),
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  saveAssetLibrary();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    saveAssetLibrary();
+  } catch (error) {
+    state.isSceneDirty = true;
+    renderAssetLibrary();
+    showErrors('浏览器存储空间不足或不可写，当前场景仍在内存中。请从资产页导出 JSON 保存。');
+    backend.log(`本地保存失败 · ${error.message}`);
+  }
 }
 
-function restoreState() {
+async function restoreState() {
+  const operation = workspaceOperation;
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
   try {
     const payload = JSON.parse(raw);
+    if (typeof payload?.taskTableOpen === 'boolean' && document.getElementById('task-table')) document.getElementById('task-table').open = payload.taskTableOpen;
     if (payload?.overlays) {
       const restoredOverlays = { ...payload.overlays };
       if (typeof restoredOverlays.equator === 'boolean' && typeof restoredOverlays.ecliptic !== 'boolean') {
         restoredOverlays.ecliptic = restoredOverlays.equator;
       }
-      state.overlays = { ...state.overlays, ...restoredOverlays };
+      state.overlays = { ...state.overlays, ...restoredOverlays, graticule: true };
       for (const [key, input] of Object.entries(els.toggles)) {
         if (input) input.checked = Boolean(state.overlays[key]);
       }
     }
     if (payload?.modulePins && typeof payload.modulePins === 'object') {
-      state.modulePins = { ...state.modulePins, ...payload.modulePins };
-    } else if (payload?.workbench) {
-      state.modulePins.workbench = payload.workbench.pinned !== false;
+      for (const name of DRAWER_MODULES) {
+        if (typeof payload.modulePins[name] === 'boolean') state.modulePins[name] = payload.modulePins[name];
+      }
     }
-    if (typeof payload?.activeModule === 'string') {
+    // v2.1 saves kept one active module; its views map onto v2.2 views, drawers only reopen when pinned.
+    if (VIEW_MODULES.includes(payload?.activeView)) state.activeView = payload.activeView;
+    else if (VIEW_MODULES.includes(payload?.activeModule)) state.activeView = payload.activeModule;
+    if (DRAWER_MODULES.has(payload?.activeModule) && state.modulePins[payload.activeModule]) {
       state.activeModule = payload.activeModule;
       state.committedModule = payload.activeModule;
     }
@@ -494,6 +826,7 @@ function restoreState() {
     if (Number.isFinite(Number(payload?.customMemoryGb))) {
       state.customMemoryGb = Number(payload.customMemoryGb);
     }
+    if (FRAME_RATE_LIMITS.includes(Number(payload?.frameRateLimit))) state.frameRateLimit = Number(payload.frameRateLimit);
     if (typeof payload?.exportNamePrefix === 'string') state.exportNamePrefix = payload.exportNamePrefix;
     if (typeof payload?.currentAssetId === 'string') state.currentAssetId = payload.currentAssetId;
     if (typeof payload?.isSceneDirty === 'boolean') state.isSceneDirty = payload.isSceneDirty;
@@ -501,7 +834,9 @@ function restoreState() {
       state.perturbationModel = payload.perturbationModel;
     }
     if (Array.isArray(payload?.orbits)) {
-      state.orbits = buildOrbitRecordsFromSerialized(payload.orbits);
+      const restored = await buildOrbitRecordsFromSerialized(payload.orbits);
+      if (operation !== workspaceOperation) return false;
+      state.orbits = restored;
       setSelectedOrbitIds(
         Array.isArray(payload.selectedIds) ? payload.selectedIds : payload.selectedId ? [payload.selectedId] : [],
         { currentId: payload.selectedId, defaultFirst: true },
@@ -509,19 +844,21 @@ function restoreState() {
     }
   } catch (error) {
     console.warn('Failed to restore local orbit state:', error);
+    showErrors(`恢复失败，原始存档仍保留：${error.message}`);
+    return false;
   }
+  return true;
 }
 
-function buildOrbitRecord(rawElements, options = {}) {
-  const orbit = computeOrbit(rawElements);
-  const name = rawElements.name?.trim() || `Orbit ${state.orbits.length + 1}`;
-  return {
+async function buildOrbitRecord(rawElements, options = {}) {
+  const records = await buildOrbitRecordsFromSerialized([{
     id: options.id ?? uuid(),
-    name,
+    name: rawElements.name?.trim() || `Orbit ${state.orbits.length + 1}`,
     color: normalizeHexColor(options.color, nextOrbitColor(state.orbits.length)),
     visible: options.visible ?? true,
-    orbit,
-  };
+    elements: rawElements,
+  }]);
+  return records[0];
 }
 
 function formToElements() {
@@ -547,6 +884,10 @@ function setColorFields(hex) {
   els.color.b.value = String(rgb.b);
   els.color.preview.style.backgroundColor = normalized;
   els.color.preview.title = normalized;
+  els.color.hexLabel.textContent = normalized.toUpperCase();
+  els.color.flyoutSwatch.style.backgroundColor = normalized;
+  els.color.flyoutHex.textContent = normalized.toUpperCase();
+  markSwatch(normalized);
 }
 
 function getFormColor() {
@@ -557,27 +898,79 @@ function setNextFormColor() {
   setColorFields(nextOrbitColor(state.orbits.length));
 }
 
-function fillForm(record) {
+// Add the approved display precision without rounding imported parameters.
+function parameterDisplayValue(value, digits) {
+  const padded = Number(value).toFixed(digits);
+  return Number(padded) === Number(value) ? padded : String(value);
+}
+
+// Show a record's values in the dossier without entering edit mode.
+function showRecordInForm(record) {
   const elements = record.orbit.elements;
   els.form.elements.name.value = record.name;
   els.form.elements.semiMajorAxisKm.value = elements.semiMajorAxisKm;
-  els.form.elements.eccentricity.value = elements.eccentricity;
-  els.form.elements.inclinationDeg.value = elements.inclinationDeg;
-  els.form.elements.raanDeg.value = elements.raanDeg;
-  els.form.elements.argPeriapsisDeg.value = elements.argPeriapsisDeg;
-  els.form.elements.trueAnomalyDeg.value = elements.trueAnomalyDeg;
+  els.form.elements.eccentricity.value = parameterDisplayValue(elements.eccentricity, 3);
+  els.form.elements.inclinationDeg.value = parameterDisplayValue(elements.inclinationDeg, 1);
+  els.form.elements.raanDeg.value = parameterDisplayValue(elements.raanDeg, 1);
+  els.form.elements.argPeriapsisDeg.value = parameterDisplayValue(elements.argPeriapsisDeg, 1);
+  els.form.elements.trueAnomalyDeg.value = parameterDisplayValue(elements.trueAnomalyDeg, 1);
   setColorFields(record.color);
-  state.editingId = record.id;
-  els.submitButton.textContent = '更新轨迹';
   clearErrors();
 }
 
-function resetForm() {
-  els.form.reset();
+// Enter edit mode: the next submit updates this orbit instead of creating one.
+function fillForm(record) {
+  showRecordInForm(record);
+  state.editingId = record.id;
+  els.submitButton.textContent = '更新轨迹';
+  els.editName.textContent = record.name;
+  els.editBanner.hidden = false;
+  els.editBanner.classList.remove('in'); void els.editBanner.offsetWidth; els.editBanner.classList.add('in');
+}
+
+function endEdit() {
   state.editingId = null;
   els.submitButton.textContent = '生成轨迹';
+  els.editBanner.hidden = true;
+}
+
+// Empty inputs show the "-" placeholder, which focus hides (CSS), so typing starts blank.
+function blankForm() {
+  els.form.reset();
   setNextFormColor();
   clearErrors();
+}
+
+// The dossier mirrors the current selection; an edit in progress keeps it locked to its orbit.
+let formBoundId;
+function syncFormToSelection() {
+  const record = selectedOrbitRecord();
+  const id = record?.id ?? null;
+  if (id === formBoundId) return;
+  formBoundId = id;
+  if (state.editingId) return;
+  if (record) showRecordInForm(record);
+  else blankForm();
+}
+
+// End any edit and let the next render mirror the selection again.
+function resetForm() {
+  endEdit();
+  blankForm();
+  formBoundId = undefined;
+}
+
+// Clear button: empty fields that stay empty until the selection changes.
+function clearFormInputs() {
+  endEdit();
+  blankForm();
+  formBoundId = selectedOrbitRecord()?.id ?? null;
+  renderOrbitList();
+}
+
+function cancelEdit() {
+  resetForm();
+  renderUi();
 }
 
 function showErrors(errors) {
@@ -674,16 +1067,15 @@ function pausePlayback() {
 }
 
 function clearGroundTrackHistories(id = null) {
-  if (id === null) {
-    state.groundTrackHistories.clear();
-  } else {
-    state.groundTrackHistories.delete(id);
-  }
+  if (id === null) groundResetToken += 1;
+  else groundResetIds.add(id);
+  invalidateComputedFrame();
   state.groundTrackTracks = [];
   renderGroundTrackStats();
 }
 
 function removeOrbit(id) {
+  workspaceOperation += 1;
   state.orbits = state.orbits.filter((orbit) => orbit.id !== id);
   clearGroundTrackHistories(id);
   clearVectorCalibration();
@@ -722,10 +1114,6 @@ function syncOverlayControlsFromState() {
   scene.setOverlayVisibility(state.overlays);
 }
 
-function formatVectorTuple(vector, digits = 2) {
-  return `(${formatNumber(vector.x, digits)}, ${formatNumber(vector.y, digits)}, ${formatNumber(vector.z, digits)})`;
-}
-
 function perturbationLabel(value = state.perturbationModel) {
   return {
     'two-body': '无摄动（二体运动）',
@@ -736,66 +1124,69 @@ function perturbationLabel(value = state.perturbationModel) {
 
 function updateStatusSelections() {
   els.frameValue.textContent = state.frame;
-  els.bodyValue.textContent = '地球';
+  els.bodyValue.textContent = state.perturbationModel === 'two-body' ? '地球 · 二体' : `地球 · ${state.perturbationModel.toUpperCase()}`;
   els.bodyValue.title = perturbationLabel();
-  for (const button of document.querySelectorAll('[data-frame-option]')) {
-    button.classList.toggle('is-active', button.dataset.frameOption === state.frame);
-  }
-  for (const button of document.querySelectorAll('[data-perturbation-model]')) {
-    button.classList.toggle('is-active', button.dataset.perturbationModel === state.perturbationModel);
-  }
-  for (const button of document.querySelectorAll('[data-body-option]')) {
-    button.classList.toggle('is-active', button.dataset.bodyOption === state.centerBody);
-  }
+  const mark = (selector, key, value) => {
+    for (const button of document.querySelectorAll(selector)) {
+      const active = button.dataset[key] === value;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-checked', String(active));
+    }
+  };
+  mark('[data-frame-option]', 'frameOption', state.frame);
+  mark('[data-perturbation-model]', 'perturbationModel', state.perturbationModel);
+  mark('[data-body-option]', 'bodyOption', state.centerBody);
 }
 
-function closeStatusCards(exceptCard = null) {
-  for (const card of document.querySelectorAll('.status-card.is-open, .status-card.is-click-closed')) {
-    if (card !== exceptCard) card.classList.remove('is-open', 'is-click-closed');
-  }
-}
-
-function toggleStatusCard(card) {
-  const shouldOpen = !card.classList.contains('is-open');
-  closeStatusCards(card);
-  card.classList.toggle('is-open', shouldOpen);
-  card.classList.toggle('is-click-closed', !shouldOpen);
-  card.focus({ preventScroll: true });
-}
-
-function moduleKind(moduleName) {
-  if (SIDE_MODULES.has(moduleName)) return 'side';
-  if (BOTTOM_MODULES.has(moduleName)) return 'bottom';
-  if (moduleName === 'info') return 'modal';
-  return 'none';
+// FRAME / MODEL / ORB menus replace the v2.1 status cards.
+function closeStatusCards() {
+  closeDropdowns();
 }
 
 function closeInfoModal() {
-  els.infoModal.hidden = true;
+  els.infoModal.classList.remove('is-open');
 }
 
-function activeSideModule() {
-  return SIDE_MODULES.has(state.activeModule) ? state.activeModule : null;
+function isGroundTrackDrawing() {
+  return state.activeView === 'groundTrack' && !['closed', 'minimized'].includes(state.groundTrackPanel);
+}
+
+// With the WebGL fallback one scene serves both the workbench stage and the ground-track
+// viewport; its canvas moves between the two slots.
+function placeSceneCanvas() {
+  if (!useWebGlScene) return; // the schematic draws each viewport on its own canvas
+  const slot = state.activeView === 'groundTrack' ? els.trackCanvasSlot : els.deckCanvasSlot;
+  if (slot && els.canvas.parentElement !== slot) {
+    slot.append(els.canvas);
+    scene.resize();
+  }
 }
 
 function applyModuleState() {
   const active = state.activeModule;
-  const sideOpen = Boolean(activeSideModule());
-  els.body.classList.toggle('side-panel-open', sideOpen);
+  els.body.classList.toggle('side-panel-open', DRAWER_MODULES.has(active));
   els.body.classList.toggle('module-previewing', Boolean(state.previewModule));
-  for (const moduleName of ['workbench', 'assets', 'settings', 'groundTrack', 'console']) {
-    els.body.classList.toggle(`module-${moduleName}-open`, active === moduleName);
-  }
+  els.body.dataset.view = state.activeView;
 
+  for (const view of els.views) view.classList.toggle('on', view.dataset.view === state.activeView);
   for (const button of els.moduleButtons) {
     const moduleName = button.dataset.moduleNav;
-    button.classList.toggle('is-active', moduleName === active);
+    const isView = VIEW_MODULES.includes(moduleName);
+    const isCurrent = isView ? moduleName === state.activeView : moduleName === active;
+    button.classList.toggle('is-active', isCurrent);
     button.classList.toggle('is-preview', moduleName === state.previewModule);
+    if (isView && isCurrent) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+    if (!isView) button.setAttribute('aria-expanded', String(isCurrent));
   }
 
   for (const panel of els.modulePanels) {
-    panel.classList.toggle('is-open', panel.dataset.modulePanel === active);
+    const moduleName = panel.dataset.modulePanel;
+    panel.classList.toggle('is-open', moduleName === active);
+    panel.classList.toggle('is-pinned', Boolean(state.modulePins[moduleName]));
   }
+  // the blurred scrim backs a committed, unpinned drawer or modal; previews and pinned drawers keep the scene live
+  els.moduleScrim?.classList.toggle('is-on', Boolean(active) && !state.previewModule && !state.modulePins[active]);
 
   for (const pinButton of els.modulePinButtons) {
     const moduleName = pinButton.dataset.modulePin;
@@ -804,19 +1195,76 @@ function applyModuleState() {
     pinButton.setAttribute('aria-pressed', String(isPinned));
   }
 
-  els.closeDrawer.setAttribute('aria-expanded', String(active === 'workbench'));
-  els.groundTrackPanel.classList.toggle('is-open', active === 'groundTrack' && state.groundTrackPanel !== 'minimized');
-  els.groundTrackPanel.classList.toggle('is-minimized', state.groundTrackPanel === 'minimized');
-  els.consolePanel.classList.toggle('is-open', active === 'console');
-  els.infoModal.hidden = active !== 'info';
-  groundTrackView.setPanelOpen(active === 'groundTrack' && state.groundTrackPanel !== 'minimized');
-  groundTrackView.setFullscreen(state.groundTrackPanel === 'fullscreen');
+  els.infoModal.classList.toggle('is-open', active === 'info');
+  if (active && active !== lastOpenedModule) moduleEnterEffects(active);
+  lastOpenedModule = active;
+  placeSceneCanvas();
+  applyGroundTrackPanelState();
+  refreshListFades();
+}
+
+// Opening a drawer or modal decodes its heading (prototype scramble) and, unless it is only a
+// hover preview, moves focus to its close button.
+let lastOpenedModule = null;
+function moduleEnterEffects(moduleName) {
+  const surface = moduleName === 'info' ? els.infoModal : els.modulePanels.find((panel) => panel.dataset.modulePanel === moduleName);
+  if (!surface) return;
+  surface.querySelectorAll('[data-scr]').forEach((el) => scramble(el));
+  if (state.previewModule) return;
+  setTimeout(() => {
+    if (state.activeModule === moduleName && !surface.contains(document.activeElement)) {
+      surface.querySelector('[data-module-close], #info-close')?.focus({ preventScroll: true });
+    }
+  }, 60);
+}
+
+function viewEnterEffects(view) {
+  if (view === 'groundTrack') {
+    syncGroundTrackHistories();
+    requestAnimationFrame(() => {
+      groundTrackView.resize();
+      renderGroundTrack({ force: true });
+    });
+  }
+  if (view === 'console') renderTaskTable(backend);
+}
+
+// Switch the persistent view behind a 1.5 s shutter wipe (instant with reduced motion).
+function setActiveView(view, { animate = true } = {}) {
+  if (!VIEW_MODULES.includes(view)) return;
+  if (view === 'groundTrack' && ['closed', 'minimized'].includes(state.groundTrackPanel)) {
+    state.groundTrackPanel = 'window';
+    syncGroundTrackHistories();
+  }
+  if (view === state.activeView) {
+    applyModuleState();
+    viewEnterEffects(view);
+    saveState();
+    return;
+  }
+  if (isSwitching()) return;
+  setColorFlyout(false);
+  closeDropdowns();
+  hideOrbitTooltip();
+  const swap = () => {
+    state.activeView = view;
+    applyModuleState();
+    viewEnterEffects(view);
+    dropIn(els.views.find((el) => el.dataset.view === view));
+  };
+  if (animate) shutter({ label: VIEW_META[view][0], code: VIEW_META[view][1] }, swap);
+  else swap();
+  saveState();
 }
 
 function openModule(moduleName, { preview = false } = {}) {
   if (!moduleName) return;
   clearTimeout(state.hoverPreviewTimer);
   state.hoverPreviewTimer = null;
+  if (VIEW_MODULES.includes(moduleName)) {
+    setActiveView(moduleName);
+    return;
+  }
   if (preview) {
     if (!state.previewModule) state.previewReturnModule = state.committedModule;
     state.previewModule = moduleName;
@@ -827,26 +1275,12 @@ function openModule(moduleName, { preview = false } = {}) {
     state.activeModule = moduleName;
     state.committedModule = moduleName;
   }
-
-  if (moduleName === 'groundTrack' && ['closed', 'minimized'].includes(state.groundTrackPanel)) state.groundTrackPanel = 'window';
-  if (moduleName === 'console') closeInfoModal();
-  if (moduleName === 'info') {
-    state.groundTrackPanel = state.groundTrackPanel === 'minimized' ? 'minimized' : state.groundTrackPanel;
-  }
   applyModuleState();
-  if (moduleName === 'groundTrack') {
-    syncGroundTrackHistories();
-    renderGroundTrack({ force: true });
-  }
   saveState();
 }
 
 function closeActiveModule() {
   if (!state.activeModule) return;
-  if (state.activeModule === 'groundTrack') {
-    setGroundTrackPanel('closed');
-    return;
-  }
   if (state.activeModule === 'info') closeInfoModal();
   state.activeModule = null;
   state.committedModule = null;
@@ -867,6 +1301,7 @@ function endModulePreview() {
 }
 
 function toggleModulePin(moduleName) {
+  if (!DRAWER_MODULES.has(moduleName)) return;
   state.modulePins[moduleName] = !state.modulePins[moduleName];
   if (state.modulePins[moduleName]) {
     state.activeModule = moduleName;
@@ -880,8 +1315,8 @@ function toggleModulePin(moduleName) {
 function toggleModuleFromSidebar(moduleName) {
   clearTimeout(state.hoverPreviewTimer);
   state.hoverPreviewTimer = null;
-  if (moduleName === 'groundTrack' && state.groundTrackPanel === 'minimized') {
-    setGroundTrackPanel('window', { confirmClose: false });
+  if (VIEW_MODULES.includes(moduleName)) {
+    setActiveView(moduleName);
     return;
   }
   if (state.activeModule === moduleName && !state.previewModule) {
@@ -891,42 +1326,105 @@ function toggleModuleFromSidebar(moduleName) {
   openModule(moduleName);
 }
 
+// Hovering a drawer's nav button for two seconds previews that drawer; views never preview.
 function startModulePreview(moduleName) {
   clearTimeout(state.hoverPreviewTimer);
+  if (!DRAWER_MODULES.has(moduleName)) return;
   state.hoverPreviewTimer = setTimeout(() => {
     if (state.activeModule === moduleName) return;
     openModule(moduleName, { preview: true });
   }, 2000);
 }
 
+// PERIOD readout cycles min → h → s on click (min is the default)
+const PERIOD_UNITS = [['min', 60, 2], ['h', 3600, 4], ['s', 1, 1]];
+let periodUnitIndex = 0;
+
+function orbitCode(record) {
+  const index = state.orbits.indexOf(record);
+  return String(index + 1).padStart(3, '0');
+}
+
+// "SELECTED // ORBIT-001": leading zeros stay slate, significant digits light up cyan
+function orbitCodeHtml(code) {
+  const zeros = code.match(/^0*(?=\d)/)[0];
+  return `ORBIT-${zeros}<span class="sig">${code.slice(zeros.length)}</span>`;
+}
+
+// HP / HA / VEL are plain tabular figures: per-digit reels snap to different pixel rows under
+// fractional Windows display scaling, which left the digits visibly out of line.
+function setFigure(el, text) {
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+function setStateVector(current) {
+  const values = current
+    ? [...['x', 'y', 'z'].map((axis) => formatNumber(current.positionKm[axis], 3)), ...['x', 'y', 'z'].map((axis) => formatNumber(current.velocityKmS[axis], 6))]
+    : Array(6).fill('—');
+  els.stateVector.forEach((cell, index) => { if (cell.textContent !== values[index]) cell.textContent = values[index]; });
+}
+
 function renderMetrics() {
   const selected = selectedOrbitRecord();
+  els.selectedOrbitHud.classList.toggle('is-empty', !selected);
   if (!selected) {
-    els.selectedOrbitName.textContent = '未选择';
-    els.metrics.innerHTML = `
-      ${metricRow('周期', '--')}
-      ${metricRow('近地点高度', '--', 'km')}
-      ${metricRow('远地点高度', '--', 'km')}
-      ${metricRow('速度范围', '--', 'km/s')}
-      ${metricRow('ECI 位置', '--', 'km')}
-      ${metricRow('ECI 速度', '--', 'km/s')}
-    `;
+    els.selectedOrbitHud.style.setProperty('--c', '#22323A');
+    if (els.selectedOrbitName.dataset.text !== '未选择轨道') {
+      els.selectedOrbitName.dataset.text = '未选择轨道';
+      els.selectedOrbitName.textContent = '未选择轨道';
+    }
+    els.selectedOrbitName.title = '';
+    els.selectedOrbitCode.innerHTML = 'ORBIT-———';
+    delete els.selectedOrbitCode.dataset.code;
+    els.selectedOrbitMulti.textContent = '';
+    els.selectedOrbitClass.hidden = true;
+    rollSet(els.selectedOrbitPeriod, '—');
+    for (const el of [els.selectedOrbitPeriapsis, els.selectedOrbitApoapsis, els.selectedOrbitSpeed]) setFigure(el, '—');
+    els.stateVectorName.textContent = '—';
+    setStateVector(null);
     return;
   }
 
   const orbit = selected.orbit;
-  const current = propagateOrbit(orbit, state.elapsedSeconds, { perturbationModel: state.perturbationModel });
-  els.selectedOrbitName.textContent = state.selectedIds.length > 1
-    ? `${selected.name} 等 ${state.selectedIds.length} 条`
+  const current = computedStates.get(selected.id);
+  els.selectedOrbitHud.style.setProperty('--c', selected.color);
+  if (els.selectedOrbitName.dataset.text !== selected.name) {
+    els.selectedOrbitName.dataset.text = selected.name;
+    els.selectedOrbitName.textContent = selected.name;
+    scramble(els.selectedOrbitName, 380);
+  }
+  els.selectedOrbitName.title = state.selectedIds.length > 1
+    ? `当前查看 ${selected.name}，已选 ${state.selectedIds.length} 条轨道`
     : selected.name;
-  els.metrics.innerHTML = `
-    ${metricRow('周期', formatDuration(orbit.periodSeconds))}
-    ${metricRow('近地点高度', `${formatNumber(orbit.periapsisAltitudeKm, 3)}`, 'km')}
-    ${metricRow('远地点高度', `${formatNumber(orbit.apoapsisAltitudeKm, 3)}`, 'km')}
-    ${metricRow('速度范围', `${formatNumber(orbit.speedRangeKmS.min, 4)} - ${formatNumber(orbit.speedRangeKmS.max, 4)}`, 'km/s')}
-    ${metricRow('ECI 位置', formatVectorTuple(current.positionKm, 2), 'km')}
-    ${metricRow('ECI 速度', formatVectorTuple(current.velocityKmS, 6), 'km/s')}
-  `;
+  const code = orbitCode(selected);
+  if (els.selectedOrbitCode.dataset.code !== code) {
+    els.selectedOrbitCode.dataset.code = code;
+    els.selectedOrbitCode.innerHTML = orbitCodeHtml(code);
+  }
+  els.selectedOrbitMulti.textContent = state.selectedIds.length > 1 ? `+${state.selectedIds.length - 1} MULTI` : '';
+  const kind = classifyOrbitRecord(selected);
+  els.selectedOrbitClass.hidden = !kind;
+  if (kind) {
+    els.selectedOrbitClass.textContent = kind.toUpperCase();
+    els.selectedOrbitClass.title = ORBIT_CLASSES[kind].zh;
+    els.selectedOrbitClass.style.setProperty('--k', ORBIT_CLASSES[kind].accent);
+  }
+  const [unit, divisor, digits] = PERIOD_UNITS[periodUnitIndex];
+  rollSet(els.selectedOrbitPeriod, Number.isFinite(orbit.periodSeconds) ? (orbit.periodSeconds / divisor).toFixed(digits) : '—');
+  els.selectedOrbitPeriodUnit.textContent = unit;
+  els.selectedOrbitPeriodCell.title = `${formatDuration(orbit.periodSeconds)} · 点击切换单位 min / h / s`;
+  setFigure(els.selectedOrbitPeriapsis, formatNumber(orbit.periapsisAltitudeKm, 1));
+  setFigure(els.selectedOrbitApoapsis, formatNumber(orbit.apoapsisAltitudeKm, 1));
+  setFigure(els.selectedOrbitSpeed, `${formatNumber(orbit.speedRangeKmS.min, 3)}–${formatNumber(orbit.speedRangeKmS.max, 3)}`);
+  els.stateVectorName.textContent = current ? selected.name : `${selected.name} · 等待后台`;
+  setStateVector(current);
+}
+
+function cyclePeriodUnit() {
+  periodUnitIndex = (periodUnitIndex + 1) % PERIOD_UNITS.length;
+  els.selectedOrbitPeriod._shape = null;
+  delete els.selectedOrbitPeriod.dataset.roll;
+  renderMetrics();
 }
 
 function calibrationModeLabel(mode = 'position') {
@@ -989,6 +1487,7 @@ function normalizeCalibrationDraftTarget() {
 }
 
 function clearSolvedCalibrationState() {
+  calibrationOperation += 1;
   state.calibrationResult = null;
   state.calibrationExpandedTargetIds.clear();
   scene.setCalibrationMarkers([]);
@@ -1040,6 +1539,7 @@ function cancelCalibrationTargetEdit() {
 }
 
 function deleteCalibrationTarget(targetId) {
+  calibrationOperation += 1;
   state.calibrationTargets = state.calibrationTargets.filter((target) => target.id !== targetId);
   state.calibrationExpandedTargetIds.delete(targetId);
   state.hiddenCalibrationTargetIds.delete(targetId);
@@ -1268,22 +1768,31 @@ function calibrationMarkersFromBatchResult(result) {
   ));
 }
 
-function runVectorCalibration() {
+async function runVectorCalibration() {
   const targetIds = new Set(state.calibrationTargets.map((target) => target.id));
   state.calibrationExpandedTargetIds = new Set([...state.calibrationExpandedTargetIds].filter((targetId) => targetIds.has(targetId)));
   state.hiddenCalibrationTargetIds = new Set([...state.hiddenCalibrationTargetIds].filter((targetId) => targetIds.has(targetId)));
   const budget = currentGroundTrackBudget();
-  state.calibrationResult = calibrateOrbitVectorTargets(state.orbits, {
-    targets: state.calibrationTargets,
-    perturbationModel: state.perturbationModel,
-    sampleCount: budget.max3dReferenceSamples,
-  });
-  refreshCalibrationMarkers();
-  renderCalibrationTargets();
-  renderCalibrationResults();
+  const version = ++calibrationOperation;
+  els.calibrationSubmitAll.disabled = true;
+  try {
+    const result = await backend.run('calibration', {
+      records: state.orbits.map(serializeOrbit),
+      targets: state.calibrationTargets,
+      perturbationModel: state.perturbationModel,
+      sampleCount: budget.max3dReferenceSamples,
+    }, `矢量标定 · ${state.calibrationTargets.length} 个目标`);
+    if (version !== calibrationOperation) return;
+    state.calibrationResult = result;
+    refreshCalibrationMarkers();
+    renderCalibrationTargets();
+    renderCalibrationResults();
+  } catch (error) { showErrors(error.message); }
+  finally { els.calibrationSubmitAll.disabled = false; }
 }
 
 function clearVectorCalibration() {
+  calibrationOperation += 1;
   state.calibrationResult = null;
   state.calibrationExpandedTargetIds.clear();
   state.hiddenCalibrationTargetIds.clear();
@@ -1292,69 +1801,136 @@ function clearVectorCalibration() {
   renderCalibrationResults();
 }
 
-function renderOrbitList() {
-  els.orbitList.innerHTML = '';
-  if (state.orbits.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-list';
-    empty.textContent = '当前没有轨道。填写六要素后生成第一条轨迹。';
-    els.orbitList.append(empty);
+const ICONS = {
+  eye: '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/>',
+  eyeOff: '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z"/><path d="M2.5 13.5l11-11"/>',
+  edit: '<path d="M10.5 2.5l3 3L6 13H3v-3z"/>',
+  editOff: '<path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M1.8 1.8l12.4 12.4"/>',
+  trash: '<path d="M2.5 4.5h11M6 4.5v-2h4v2M4 4.5l.7 9h6.6l.7-9"/>',
+  check: '<path d="M3 8.5L6.5 12 13 4"/>',
+};
+const icon = (name) => `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>`;
+
+function iconButton(className, name, label, onClick, pressed = null) {
+  const button = document.createElement('button');
+  button.className = `ib ${className}`.trim();
+  button.type = 'button';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  if (pressed !== null) button.setAttribute('aria-pressed', String(pressed));
+  button.innerHTML = icon(name);
+  button.addEventListener('click', (event) => { event.stopPropagation(); onClick(); });
+  return button;
+}
+
+// Pencil toggles edit mode: a second click on the orbit being edited cancels the edit.
+function toggleOrbitEdit(record) {
+  if (state.editingId === record.id) {
+    cancelEdit();
     return;
   }
+  const enter = () => {
+    selectOrbit(record.id);
+    fillForm(record);
+    renderOrbitList();
+    els.form.elements.name.focus({ preventScroll: true });
+  };
+  if (state.activeView !== 'workbench') {
+    setActiveView('workbench');
+    setTimeout(enter, RM.matches ? 0 : VIEW_MS + 60);
+  } else enter();
+}
 
-  for (const record of state.orbits) {
-    const item = document.createElement('div');
-    const isSelected = isOrbitSelected(record.id);
-    const isMuted = state.selectedIds.length > 0 && !isSelected;
-    item.className = `orbit-item${isSelected ? ' is-selected' : ''}${isMuted ? ' is-muted' : ''}`;
+// Roster card: colour spine, select box, name, class badge + status tag, actions. Both rosters
+// (workbench dossier and ground-track view) render the same cards from the same state.
+function orbitCard(record, list) {
+  const item = document.createElement('div');
+  const isSelected = isOrbitSelected(record.id);
+  const isMuted = state.selectedIds.length > 0 && !isSelected;
+  const isEditing = state.editingId === record.id;
+  item.className = `card orbit-item${isSelected ? ' sel is-selected' : ''}${isMuted ? ' is-muted' : ''}${record.visible ? '' : ' off is-hidden-orbit'}`;
+  item.setAttribute('role', 'listitem');
+  item.style.setProperty('--c', record.color);
+  item.style.setProperty('--orbit-color', record.color);
+  item.dataset.orbitId = record.id;
 
-    const dot = document.createElement('span');
-    dot.className = 'color-dot';
-    dot.style.backgroundColor = record.color;
+  const toggleSelection = () => { toggleOrbitSelection(record.id); };
 
-    const main = document.createElement('button');
-    main.className = 'orbit-main';
-    main.type = 'button';
-    main.innerHTML = `<strong>${record.name}</strong><span>a ${formatNumber(record.orbit.elements.semiMajorAxisKm, 0)} km · e ${formatNumber(record.orbit.elements.eccentricity, 4)} · i ${formatNumber(record.orbit.elements.inclinationDeg, 2)} °</span>`;
-    main.addEventListener('click', () => {
-      const selected = toggleOrbitSelection(record.id);
-      const current = selectedOrbitRecord();
-      if (selected) fillForm(record);
-      else if (current) fillForm(current);
-      else resetForm();
-    });
+  const selection = document.createElement('input');
+  selection.className = 'orbit-select ck';
+  selection.type = 'checkbox';
+  selection.checked = isSelected;
+  selection.setAttribute('aria-label', `选择轨道 ${record.name}`);
+  selection.addEventListener('click', (event) => event.stopPropagation());
+  selection.addEventListener('change', () => {
+    toggleSelection();
+    // Rendering replaces the row; retain keyboard focus for multi-selection.
+    list.querySelector(`[data-orbit-id="${CSS.escape(record.id)}"] .orbit-select`)?.focus({ preventScroll: true });
+  });
 
-    const actions = document.createElement('div');
-    actions.className = 'orbit-actions';
+  const main = document.createElement('button');
+  main.className = 'orbit-main nm';
+  main.type = 'button';
+  main.setAttribute('aria-pressed', String(isSelected));
+  main.innerHTML = `<span>${escapeHtml(record.name)}</span>`;
+  main.addEventListener('click', toggleSelection);
 
-    const visibility = document.createElement('button');
-    visibility.className = 'mini-button';
-    visibility.type = 'button';
-    visibility.title = record.visible ? '隐藏轨道' : '显示轨道';
-    visibility.textContent = record.visible ? '●' : '○';
-    visibility.addEventListener('click', () => toggleOrbitVisibility(record.id));
-
-    const edit = document.createElement('button');
-    edit.className = 'mini-button';
-    edit.type = 'button';
-    edit.title = '编辑参数';
-    edit.textContent = '✎';
-    edit.addEventListener('click', () => {
-      selectOrbit(record.id);
-      fillForm(record);
-    });
-
-    const remove = document.createElement('button');
-    remove.className = 'mini-button';
-    remove.type = 'button';
-    remove.title = '删除轨道';
-    remove.textContent = '×';
-    remove.addEventListener('click', () => removeOrbit(record.id));
-
-    actions.append(visibility, edit, remove);
-    item.append(dot, main, actions);
-    els.orbitList.append(item);
+  const meta = document.createElement('div');
+  meta.className = 'cls';
+  const kind = classifyOrbitRecord(record);
+  if (kind) {
+    const badge = document.createElement('span');
+    badge.className = 'ocls';
+    badge.style.setProperty('--k', ORBIT_CLASSES[kind].accent);
+    badge.title = ORBIT_CLASSES[kind].zh;
+    badge.textContent = kind.toUpperCase();
+    meta.append(badge);
   }
+  if (isEditing || isSelected) {
+    const tag = document.createElement('span');
+    tag.className = `stag${isEditing ? ' rev' : ''}`;
+    tag.dataset.i18nSkip = '';
+    tag.textContent = isEditing ? '/// REVISED' : '/// SELECTED';
+    meta.append(tag);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'acts orbit-actions';
+  actions.append(
+    iconButton('', record.visible ? 'eye' : 'eyeOff', `${record.visible ? '隐藏轨道' : '显示轨道'} ${record.name}`, () => toggleOrbitVisibility(record.id), !record.visible),
+    iconButton(isEditing ? 'on' : '', isEditing ? 'editOff' : 'edit', isEditing ? `取消编辑 ${record.name}` : `编辑参数 ${record.name}`, () => toggleOrbitEdit(record), isEditing),
+    iconButton('del delete-orbit', 'trash', `删除轨道 ${record.name}`, () => removeOrbit(record.id)),
+  );
+  item.addEventListener('click', (event) => { if (event.target === item) toggleSelection(); });
+  item.append(selection, main, meta, actions);
+  return item;
+}
+
+function renderOrbitList() {
+  for (const list of els.orbitLists) {
+    list.innerHTML = '';
+    if (state.orbits.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-list empty';
+      empty.textContent = '当前没有轨道。填写六要素后生成第一条轨迹。';
+      list.append(empty);
+      continue;
+    }
+    for (const record of pageRecords(list, state.orbits, renderOrbitList)) list.append(orbitCard(record, list));
+  }
+  renderRosterMeta();
+  refreshListFades();
+}
+
+// Header count and footer status (orbit group + visible / selected) for both rosters.
+function renderRosterMeta() {
+  const count = String(state.orbits.length).padStart(2, '0');
+  for (const el of document.querySelectorAll('.js-rcount')) rollSet(el, count);
+  const meta = `VIS ${state.orbits.filter((orbit) => orbit.visible).length} · SEL ${state.selectedIds.length}`;
+  for (const el of document.querySelectorAll('.js-rmeta')) el.textContent = meta;
+  const group = activeAssetGroup();
+  const label = `轨道组 <b>${escapeHtml(group?.name ?? '未命名')}</b>${state.isSceneDirty ? ' · <span class="dirty">● 未保存</span>' : ''}`;
+  for (const el of document.querySelectorAll('.js-grp')) el.innerHTML = label;
 }
 
 function renderStatusOrbitMenu() {
@@ -1368,25 +1944,24 @@ function renderStatusOrbitMenu() {
     return;
   }
 
-  for (const record of visibleOrbits) {
+  for (const record of pageRecords(els.statusOrbitMenu, visibleOrbits, renderStatusOrbitMenu)) {
     const button = document.createElement('button');
     button.className = `status-option status-orbit-choice${isOrbitSelected(record.id) ? ' is-active' : ''}`;
     button.type = 'button';
     button.dataset.statusOrbitId = record.id;
 
-    const dot = document.createElement('span');
+    button.classList.add('dd-opt');
+    button.setAttribute('role', 'menuitemcheckbox');
+    button.setAttribute('aria-checked', String(isOrbitSelected(record.id)));
+    button.style.setProperty('--c', record.color);
+    const dot = document.createElement('i');
     dot.className = 'color-dot';
-    dot.style.backgroundColor = record.color;
-    const name = document.createElement('span');
+    const name = document.createElement('b');
     name.textContent = record.name;
 
     button.append(dot, name);
     button.addEventListener('click', () => {
-      const selected = toggleOrbitSelection(record.id);
-      const current = selectedOrbitRecord();
-      if (selected) fillForm(record);
-      else if (current) fillForm(current);
-      else resetForm();
+      toggleOrbitSelection(record.id);
     });
     els.statusOrbitMenu.append(button);
   }
@@ -1410,7 +1985,12 @@ function orbitTooltipHtml(record) {
   `;
 }
 
+function hideOrbitTooltip() {
+  els.orbitTooltip.hidden = true;
+}
+
 function showOrbitTooltip(payload) {
+  if (state.activeView !== 'workbench') payload = null;
   if (!payload?.orbitRecord) {
     els.orbitTooltip.hidden = true;
     return;
@@ -1472,12 +2052,36 @@ function syncPerformanceFromControls() {
     : 'high';
   state.customMemoryGb = Math.max(1, Math.min(24, Number(els.customMemory.value) || 8));
   currentGroundTrackBudget();
+  renderSettingsReadouts();
+}
+
+const PERFORMANCE_HINTS = {
+  'power-save': '节能：星下点每圈 96 采样，三维参考轨道 ≤ 900 点，适合笔记本电池供电。',
+  balanced: '均衡：星下点每圈 160 采样，三维参考轨道 ≤ 1800 点。',
+  high: '高性能：星下点每圈 240 采样，三维参考轨道 ≤ 3600 点（默认）。',
+  custom: '自定义：按下方显存预算缩放采样上限。',
+};
+
+// Settings readouts: preset hint, memory gauge (dimmed unless the custom preset uses it), frame rate.
+function renderSettingsReadouts() {
+  if (els.performanceHint) els.performanceHint.textContent = PERFORMANCE_HINTS[state.performanceMode] ?? '';
+  const memory = Math.round(state.customMemoryGb);
+  if (els.customMemoryValue) els.customMemoryValue.textContent = `${memory} GB`;
+  if (els.customMemoryGrid) {
+    if (els.customMemoryGrid.childElementCount !== 24) els.customMemoryGrid.innerHTML = '<i></i>'.repeat(24);
+    [...els.customMemoryGrid.children].forEach((cell, index) => cell.classList.toggle('on', index < memory));
+    els.customMemoryGrid.classList.toggle('is-idle', state.performanceMode !== 'custom');
+  }
+  if (els.frameRateValue) els.frameRateValue.textContent = state.frameRateLimit > 0 ? `${state.frameRateLimit} FPS` : 'MAX';
+  syncSegmentedSelects();
 }
 
 function syncSettingsControls() {
   els.performanceMode.value = state.performanceMode;
   els.customMemory.value = String(state.customMemoryGb);
+  els.frameRateLimit.value = String(state.frameRateLimit);
   els.exportNamePrefix.value = state.exportNamePrefix;
+  renderSettingsReadouts();
 }
 
 function syncGroundTrackOptionControls() {
@@ -1510,6 +2114,7 @@ function syncGroundTrackFilters() {
 
 function renderGroundTrackFilters() {
   syncGroundTrackFilters();
+  updateGroundTrackCount();
   els.groundTrackFilterList.innerHTML = '';
   const visibleOrbits = state.orbits.filter((orbit) => orbit.visible);
   if (visibleOrbits.length === 0) {
@@ -1520,9 +2125,10 @@ function renderGroundTrackFilters() {
     return;
   }
 
-  for (const record of visibleOrbits) {
+  for (const record of pageRecords(els.groundTrackFilterList, visibleOrbits, renderGroundTrackFilters)) {
     const label = document.createElement('label');
-    label.className = 'ground-track-filter-row';
+    label.className = 'ground-track-filter-row tchip';
+    label.style.setProperty('--c', record.color);
 
     const input = document.createElement('input');
     input.type = 'checkbox';
@@ -1532,12 +2138,12 @@ function renderGroundTrackFilters() {
     const name = document.createElement('span');
     name.textContent = record.name;
 
-    const swatch = document.createElement('span');
+    const swatch = document.createElement('i');
     swatch.className = 'ground-track-color-swatch';
-    swatch.style.color = record.color;
 
     input.addEventListener('change', () => {
       state.groundTrackFilters[record.id] = input.checked;
+      updateGroundTrackCount();
       if (!input.checked) clearGroundTrackHistories(record.id);
       markSceneDirty();
       syncGroundTrackHistories();
@@ -1545,9 +2151,15 @@ function renderGroundTrackFilters() {
       saveState();
     });
 
-    label.append(input, name, swatch);
+    label.append(input, swatch, name);
     els.groundTrackFilterList.append(label);
   }
+  updateGroundTrackCount();
+}
+
+function updateGroundTrackCount() {
+  if (!els.groundTrackCount) return;
+  els.groundTrackCount.textContent = String(state.orbits.filter((orbit) => orbit.visible && state.groundTrackFilters[orbit.id] === true).length);
 }
 
 function currentGroundTrackWindow() {
@@ -1562,10 +2174,6 @@ function currentGroundTrackWindow() {
     };
 }
 
-function groundTrackReferenceSampleCount(orbitRecord, budget) {
-  return orbitReferenceSampleCount(orbitRecord.orbit, budget.max3dReferenceSamples);
-}
-
 function activeGroundTrackRecords(budget) {
   syncGroundTrackFilters();
   return state.orbits
@@ -1574,78 +2182,67 @@ function activeGroundTrackRecords(budget) {
 }
 
 function rebuildGroundTrackTracksFromCache(records = null) {
-  const budget = currentGroundTrackBudget();
-  const activeRecords = records ?? activeGroundTrackRecords(budget);
-  const window = currentGroundTrackWindow();
-  state.groundTrackTracks = activeRecords
-    .map((orbitRecord) => {
-      const history = state.groundTrackHistories.get(orbitRecord.id);
-      return history ? groundTrackTrackFromHistory(history, orbitRecord, window) : null;
-    })
-    .filter(Boolean);
+  const activeIds = new Set((records ?? activeGroundTrackRecords(currentGroundTrackBudget())).map((record) => record.id));
+  state.groundTrackTracks = state.groundTrackTracks.filter((track) => activeIds.has(track.id));
   return state.groundTrackTracks;
 }
 
 function syncGroundTrackHistories() {
+  frameDirty = true;
+  frameRevision += 1;
   if (state.groundTrackPanel === 'closed') {
     state.groundTrackTracks = [];
     return;
   }
-  const budget = currentGroundTrackBudget();
-  const activeRecords = activeGroundTrackRecords(budget);
-  const activeIds = new Set(activeRecords.map((orbit) => orbit.id));
-  const startUtcMs = utcMsFromInput(state.simulationStartUtc, Date.now());
-  const window = currentGroundTrackWindow();
-
-  for (const id of state.groundTrackHistories.keys()) {
-    if (!activeIds.has(id)) state.groundTrackHistories.delete(id);
-  }
-
-  for (const orbitRecord of activeRecords) {
-    const history = updateGroundTrackHistory(state.groundTrackHistories.get(orbitRecord.id), {
-      orbitRecord,
-      elapsedSeconds: state.elapsedSeconds,
-      startUtcMs,
-      perturbationModel: state.perturbationModel,
-      referenceSampleCount: groundTrackReferenceSampleCount(orbitRecord, budget),
-      window,
-      maxCatchUpPoints: Math.max(60, Math.floor(budget.maxGroundTrackSamples / Math.max(1, activeRecords.length))),
-    });
-    state.groundTrackHistories.set(orbitRecord.id, history);
-  }
-
-  rebuildGroundTrackTracksFromCache(activeRecords);
-}
-
-function pruneGroundTrackHistoriesToWindow() {
-  const window = currentGroundTrackWindow();
-  for (const history of state.groundTrackHistories.values()) {
-    pruneGroundTrackHistory(history, window, state.elapsedSeconds);
-  }
   rebuildGroundTrackTracksFromCache();
 }
 
-function renderGroundTrackStats(stats = null) {
-  if (!stats) {
-    els.groundTrackStats.textContent = '框选地图区域后显示统计。';
-    return;
-  }
-  if (stats.totalPointCount === 0) {
-    els.groundTrackStats.innerHTML = '<div class="empty-list">当前区域没有星下点轨迹经过。</div>';
-    return;
-  }
+function pruneGroundTrackHistoriesToWindow() {
+  // The worker owns and prunes history; only request a fresh display snapshot.
+  syncGroundTrackHistories();
+}
 
-  els.groundTrackStats.innerHTML = stats.items.map((item) => `
-    <article class="ground-track-stat-item">
-      <span class="color-dot" style="background:${escapeHtml(item.color)}"></span>
-      <div>
-        <strong>${escapeHtml(item.name)}</strong>
-        <span>${formatNumber(item.pointCount, 0)} 点 · ${escapeHtml(item.perturbationModel)}</span>
-        <small>${formatUtc(item.earliestUtcMs)} - ${formatUtc(item.latestUtcMs)}</small>
-        <small>经度 ${formatNumber(item.westDeg, 2)}° ~ ${formatNumber(item.eastDeg, 2)}° · 纬度 ${formatNumber(item.southDeg, 2)}° ~ ${formatNumber(item.northDeg, 2)}°</small>
-      </div>
-    </article>
-  `).join('');
+let regionSequence = 0;
+let lastRegionStats = null;
+
+function regionRange(min, max) {
+  return `${formatNumber(min, 2)}° ~ ${formatNumber(max, 2)}°`;
+}
+
+// Region stats render as the MOD.06 module: summary strip, per-orbit table, clear / CSV.
+function renderGroundTrackStats(stats = null) {
+  lastRegionStats = stats;
+  if (!stats) {
+    els.groundTrackStats.innerHTML = '<div class="empty-list empty">按住 <kbd>Shift</kbd>（或右键）在星下点地图上拖拽框选区域<br>统计各轨道命中点数、最早 / 最晚 UTC 与经纬范围</div>';
+    return;
+  }
+  const bounds = stats.bounds ?? {};
+  const summary = `<div class="rg-sum"><span>REGION-${String(regionSequence).padStart(2, '0')}</span><span>经度 <b>${regionRange(bounds.westDeg, bounds.eastDeg)}</b></span><span>纬度 <b>${regionRange(bounds.southDeg, bounds.northDeg)}</b></span><span>${formatNumber(stats.totalPointCount, 0)} 点</span></div>`;
+  const actions = '<div class="actions rg-act"><button class="btn sm" type="button" data-region-action="clear">清除选区</button><button class="btn sm" type="button" data-region-action="csv">导出统计 CSV</button></div>';
+  if (stats.totalPointCount === 0) {
+    els.groundTrackStats.innerHTML = `${summary}<div class="empty-list empty">当前区域没有星下点轨迹经过。</div>${actions}`;
+    return;
+  }
+  els.groundTrackStats.innerHTML = `${summary}<div class="tbl-wrap"><table class="tbl"><thead><tr><th>轨道</th><th>命中</th><th>最早 UTC</th><th>最晚 UTC</th><th>经度范围</th><th>纬度范围</th><th>模型</th></tr></thead><tbody>${stats.items.map((item) => `
+    <tr class="ground-track-stat-item"><td><span class="sw color-dot" style="background:${escapeHtml(item.color)}"></span> ${escapeHtml(item.name)}</td><td>${formatNumber(item.pointCount, 0)}</td><td>${formatUtc(item.earliestUtcMs)}</td><td>${formatUtc(item.latestUtcMs)}</td><td>${regionRange(item.westDeg, item.eastDeg)}</td><td>${regionRange(item.southDeg, item.northDeg)}</td><td>${escapeHtml(item.perturbationModel)}</td></tr>`).join('')}</tbody></table></div>${actions}`;
+}
+
+function regionStatsCsv(stats) {
+  const quote = (value) => `"${String(value).replaceAll('"', '""')}"`;
+  const rows = [['orbit', 'points', 'earliest_utc', 'latest_utc', 'west_deg', 'east_deg', 'south_deg', 'north_deg', 'model']];
+  for (const item of stats.items) {
+    rows.push([item.name, item.pointCount, new Date(item.earliestUtcMs).toISOString(), new Date(item.latestUtcMs).toISOString(), item.westDeg, item.eastDeg, item.southDeg, item.northDeg, item.perturbationModel]);
+  }
+  return rows.map((row) => row.map(quote).join(',')).join('\r\n');
+}
+
+function handleRegionAction(action) {
+  if (action === 'clear') {
+    groundTrackView.clearRegion?.();
+    renderGroundTrackStats(null);
+  } else if (action === 'csv' && lastRegionStats) {
+    downloadText(`${state.exportNamePrefix || 'ground-track'}-region-${currentTimestampLabel()}.csv`, '\uFEFF' + regionStatsCsv(lastRegionStats), 'text/csv;charset=utf-8');
+  }
 }
 
 function activeAssetGroup() {
@@ -1658,6 +2255,8 @@ function renderAssetLibrary() {
   els.assetDirtyState.textContent = state.isSceneDirty
     ? activeGroup ? '有未保存修改' : '未保存'
     : activeGroup ? '已保存' : '未保存';
+  els.assetDirtyState.classList.toggle('dirty', state.isSceneDirty);
+  renderRosterMeta();
   els.assetGroupName.value = activeGroup?.name ?? els.assetGroupName.value;
   els.assetGroupList.innerHTML = '';
 
@@ -1671,41 +2270,47 @@ function renderAssetLibrary() {
 
   for (const group of state.assetGroups) {
     const row = document.createElement('article');
-    row.className = `asset-group-row${group.id === state.currentAssetId ? ' is-active' : ''}`;
+    const isCurrent = group.id === state.currentAssetId;
+    row.className = `asset-group-row gitem${isCurrent ? ' is-active cur' : ''}`;
 
     const main = document.createElement('button');
     main.className = 'orbit-main';
     main.type = 'button';
-    main.innerHTML = `<strong>${escapeHtml(group.name)}</strong><span>${group.snapshot?.orbits?.length ?? 0} 条轨道 · ${escapeHtml(formatUtc(group.updatedAt))}</span>`;
+    main.title = '载入此轨道组';
+    main.innerHTML = `<strong>${escapeHtml(group.name)}${isCurrent ? '<span class="badge" data-i18n-skip>CURRENT</span>' : ''}</strong><span>${group.snapshot?.orbits?.length ?? 0} 条轨道 · ${escapeHtml(formatUtc(group.updatedAt))}</span>`;
     main.addEventListener('click', () => loadAssetGroup(group.id));
 
-    const exportButton = document.createElement('button');
-    exportButton.className = 'mini-button';
-    exportButton.type = 'button';
-    exportButton.title = '导出 JSON';
-    exportButton.textContent = '⇩';
-    exportButton.addEventListener('click', () => {
+    const textButton = (label, title, onClick) => {
+      const button = document.createElement('button');
+      button.className = 'btn';
+      button.type = 'button';
+      button.title = title;
+      button.textContent = label;
+      button.addEventListener('click', onClick);
+      return button;
+    };
+    const loadButton = textButton('载入', '载入此轨道组', () => loadAssetGroup(group.id));
+    const exportButton = textButton('导出', '导出 JSON', () => {
       downloadText(`${group.name || 'orbit-group'}-${currentTimestampLabel()}.json`, JSON.stringify({
         version: 1,
         snapshot: group.snapshot,
       }, null, 2));
     });
-
-    const renameButton = document.createElement('button');
-    renameButton.className = 'mini-button';
-    renameButton.type = 'button';
-    renameButton.title = '重命名';
-    renameButton.textContent = '✎';
-    renameButton.addEventListener('click', () => renameAssetGroup(group.id));
+    const renameButton = textButton('重命名', '重命名', () => renameAssetGroup(group.id));
 
     const deleteButton = document.createElement('button');
-    deleteButton.className = 'mini-button';
+    deleteButton.className = 'ib';
     deleteButton.type = 'button';
     deleteButton.title = '删除';
-    deleteButton.textContent = '×';
+    deleteButton.setAttribute('aria-label', `删除轨道组 ${group.name}`);
+    deleteButton.innerHTML = icon('trash');
     deleteButton.addEventListener('click', () => deleteAssetGroup(group.id));
 
-    row.append(main, exportButton, renameButton, deleteButton);
+    const actions = document.createElement('div');
+    actions.className = 'ga';
+    actions.append(loadButton, exportButton, renameButton, deleteButton);
+
+    row.append(main, actions);
     els.assetGroupList.append(row);
   }
 }
@@ -1729,11 +2334,12 @@ function saveCurrentAssetGroup() {
   renderAssetLibrary();
 }
 
-function loadAssetGroup(id) {
+async function loadAssetGroup(id) {
   const group = state.assetGroups.find((item) => item.id === id);
   if (!group) return;
   if (state.isSceneDirty && !window.confirm('当前轨道组有未保存修改，切换会丢弃这些修改。是否继续？')) return;
-  applyWorkbenchSnapshot(group.snapshot);
+  try { await applyWorkbenchSnapshot(group.snapshot); }
+  catch (error) { showErrors(error.message); return; }
   state.currentAssetId = group.id;
   state.isSceneDirty = false;
   renderUi();
@@ -1766,7 +2372,10 @@ function deleteAssetGroup(id) {
 
 function clearCurrentSceneWithConfirmation() {
   if (state.isSceneDirty && !window.confirm('当前轨道组尚未保存到资产，清除后无法恢复。是否继续？')) return;
+  workspaceOperation += 1;
+  persistenceReady = true;
   state.orbits = [];
+  state.isPlaying = false;
   setSelectedOrbitIds([]);
   state.editingId = null;
   state.elapsedSeconds = 0;
@@ -1780,11 +2389,16 @@ function clearCurrentSceneWithConfirmation() {
 }
 
 function applyGroundTrackPanelState() {
-  const isOpen = state.activeModule === 'groundTrack' && !['closed', 'minimized'].includes(state.groundTrackPanel);
+  const isOpen = isGroundTrackDrawing();
   const isFullscreen = state.groundTrackPanel === 'fullscreen';
+  const isClosed = state.groundTrackPanel === 'closed';
   els.groundTrackPanel.classList.toggle('is-open', isOpen);
   els.groundTrackPanel.classList.toggle('is-fullscreen', isFullscreen);
   els.groundTrackPanel.classList.toggle('is-minimized', state.groundTrackPanel === 'minimized');
+  els.groundTrackPanel.hidden = isClosed;
+  els.groundTrackClosed.hidden = !isClosed;
+  els.groundTrackMinimize.setAttribute('aria-pressed', String(state.groundTrackPanel === 'minimized'));
+  els.groundTrackModeToggle.setAttribute('aria-pressed', String(isFullscreen));
   groundTrackView.setPanelOpen(isOpen);
   groundTrackView.setFullscreen(isFullscreen);
 }
@@ -1800,28 +2414,23 @@ function setGroundTrackPanel(mode, { confirmClose = true } = {}) {
     if (!confirmed) return;
   }
   state.groundTrackPanel = nextMode;
-  if (nextMode === 'closed') {
-    clearGroundTrackHistories();
-    if (state.activeModule === 'groundTrack') {
-      state.activeModule = null;
-      state.committedModule = null;
-    }
-  } else {
-    state.activeModule = 'groundTrack';
-    state.committedModule = 'groundTrack';
-  }
+  // The map lives in the ground-track view: closing keeps the view (showing a reopen
+  // placeholder) and stops backend recording; minimise collapses it while recording continues.
+  if (nextMode === 'closed') clearGroundTrackHistories();
   applyGroundTrackPanelState();
   applyModuleState();
-  const shouldDraw = !['closed', 'minimized'].includes(state.groundTrackPanel);
-  if (shouldDraw) {
-    syncGroundTrackHistories();
-    requestAnimationFrame(() => renderGroundTrack({ force: true }));
+  if (nextMode !== 'closed') syncGroundTrackHistories();
+  if (isGroundTrackDrawing()) {
+    requestAnimationFrame(() => {
+      groundTrackView.resize();
+      renderGroundTrack({ force: true });
+    });
   }
   saveState();
 }
 
 function renderGroundTrack(options = {}) {
-  const isOpen = state.activeModule === 'groundTrack' && !['closed', 'minimized'].includes(state.groundTrackPanel);
+  const isOpen = isGroundTrackDrawing();
   groundTrackView.setPanelOpen(isOpen);
   groundTrackView.setFullscreen(state.groundTrackPanel === 'fullscreen');
   if (!isOpen) return;
@@ -1829,31 +2438,28 @@ function renderGroundTrack(options = {}) {
   const nowMs = performance.now();
   const minIntervalMs = state.isPlaying ? 240 : 800;
   if (!options.force && nowMs - state.lastGroundTrackRenderMs < minIntervalMs) {
-    groundTrackView.setData(state.groundTrackTracks, {
-      selectedIds: state.selectedIds,
-      elapsedSeconds: state.elapsedSeconds,
-      isPlaying: state.isPlaying,
-    });
+    groundTrackView.setData(state.groundTrackTracks, groundTrackDataOptions());
     return;
   }
 
   state.lastGroundTrackRenderMs = nowMs;
   rebuildGroundTrackTracksFromCache();
-  groundTrackView.setData(state.groundTrackTracks, {
+  groundTrackView.setData(state.groundTrackTracks, groundTrackDataOptions());
+}
+
+function groundTrackDataOptions(isPlaying = state.isPlaying) {
+  return {
     selectedIds: state.selectedIds,
     elapsedSeconds: state.elapsedSeconds,
-    isPlaying: state.isPlaying,
-  });
+    isPlaying,
+    utcMs: utcMsFromInput(state.simulationStartUtc, Date.now()) + state.elapsedSeconds * 1000,
+  };
 }
 
 function exportGroundTrackPng() {
   syncGroundTrackHistories();
   rebuildGroundTrackTracksFromCache();
-  groundTrackView.setData(state.groundTrackTracks, {
-    selectedIds: state.selectedIds,
-    elapsedSeconds: state.elapsedSeconds,
-    isPlaying: false,
-  });
+  groundTrackView.setData(state.groundTrackTracks, groundTrackDataOptions(false));
   const png = groundTrackView.capturePng({ width: 1920, height: 1080 });
   const prefix = (state.exportNamePrefix || 'ground-track').trim() || 'ground-track';
   downloadDataUrl(`${prefix}-${currentTimestampLabel()}.png`, png);
@@ -1869,47 +2475,50 @@ function loadImageFromDataUrl(dataUrl) {
 }
 
 async function composeScreenshotDataUrl() {
-  const scenePng = scene.capturePng();
-  const shouldIncludeMap = state.activeModule === 'groundTrack' && !['closed', 'minimized'].includes(state.groundTrackPanel);
-  if (!shouldIncludeMap) return scenePng;
+  // in the ground-track view the 3D viewport is the mini schematic
+  const viewScene = state.activeView === 'groundTrack' && miniScene ? miniScene : scene;
+  const sceneCanvas = viewScene === miniScene ? els.miniCanvas : els.canvas;
+  const scenePng = viewScene.capturePng();
+  if (!isGroundTrackDrawing()) return scenePng;
 
   const mapPng = groundTrackView.capturePng();
   if (state.groundTrackPanel === 'fullscreen') return mapPng;
 
+  // Ground-track view: map and 3D viewport sit side by side; keep their on-screen layout.
   const [sceneImage, mapImage] = await Promise.all([
     loadImageFromDataUrl(scenePng),
     loadImageFromDataUrl(mapPng),
   ]);
-  const sceneRect = els.canvas.getBoundingClientRect();
+  const sceneRect = sceneCanvas.getBoundingClientRect();
   const mapRect = els.groundTrackCanvas.getBoundingClientRect();
+  const left = Math.min(sceneRect.left, mapRect.left);
+  const top = Math.min(sceneRect.top, mapRect.top);
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(sceneRect.width));
-  canvas.height = Math.max(1, Math.round(sceneRect.height));
+  canvas.width = Math.max(1, Math.round(Math.max(sceneRect.right, mapRect.right) - left));
+  canvas.height = Math.max(1, Math.round(Math.max(sceneRect.bottom, mapRect.bottom) - top));
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(sceneImage, 0, 0, canvas.width, canvas.height);
-
-  const x = Math.max(0, Math.round(mapRect.left - sceneRect.left));
-  const y = Math.max(0, Math.round(mapRect.top - sceneRect.top));
-  const width = Math.min(canvas.width - x, Math.round(mapRect.width));
-  const height = Math.min(canvas.height - y, Math.round(mapRect.height));
-  ctx.fillStyle = 'rgba(7, 16, 22, 0.94)';
-  ctx.fillRect(Math.max(0, x - 10), Math.max(0, y - 10), Math.min(canvas.width, width + 20), Math.min(canvas.height, height + 20));
-  ctx.drawImage(mapImage, x, y, width, height);
-  ctx.strokeStyle = 'rgba(86, 140, 135, 0.72)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
+  ctx.fillStyle = '#E7EEED';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (const [image, rect] of [[mapImage, mapRect], [sceneImage, sceneRect]]) {
+    ctx.drawImage(image, Math.round(rect.left - left), Math.round(rect.top - top), Math.round(rect.width), Math.round(rect.height));
+    ctx.strokeStyle = 'rgba(40, 78, 80, 0.36)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(rect.left - left) + 0.5, Math.round(rect.top - top) + 0.5, Math.round(rect.width) - 1, Math.round(rect.height) - 1);
+  }
   return canvas.toDataURL('image/png');
 }
 
 function renderUi() {
+  frameRevision += 1;
+  frameDirty = true;
   els.orbitCount.textContent = String(state.orbits.filter((orbit) => orbit.visible).length);
-  els.orbitListCount.textContent = `${state.orbits.length} 条`;
   els.emptyState.classList.toggle('is-hidden', state.orbits.length > 0);
   els.playToggle.disabled = state.isPlaying;
   els.pauseButton.disabled = !state.isPlaying;
   updateTimeReadout();
   applyModuleState();
   updateStatusSelections();
+  syncFormToSelection();
   renderOrbitList();
   renderStatusOrbitMenu();
   renderMetrics();
@@ -1918,10 +2527,12 @@ function renderUi() {
   renderCalibrationResults();
   syncOverlayControlsFromState();
   scene.setFrame(state.frame);
+  scene.setEpoch?.(utcMsFromInput(state.simulationStartUtc, Date.now()));
   scene.setOverlayVisibility(state.overlays);
   scene.syncOrbits(state.orbits, state.perturbationModel);
   scene.setSelectedOrbits(state.selectedIds);
   syncGroundTrackControlsFromState();
+  syncSegmentedSelects();
   syncGroundTrackOptionControls();
   syncSettingsControls();
   currentGroundTrackBudget();
@@ -1930,6 +2541,7 @@ function renderUi() {
   renderAssetLibrary();
   syncGroundTrackHistories();
   renderGroundTrack({ force: true });
+  ensureBackendReferences();
 }
 
 function downloadText(filename, text, type = 'application/json') {
@@ -1969,7 +2581,7 @@ async function importJson(file) {
     const payload = JSON.parse(text);
     const snapshot = payload.snapshot ?? payload;
     if (!Array.isArray(snapshot.orbits)) throw new Error('JSON 中缺少 orbits 数组。');
-    applyWorkbenchSnapshot(snapshot);
+    await applyWorkbenchSnapshot(snapshot);
     state.currentAssetId = null;
     state.isSceneDirty = true;
     clearGroundTrackHistories();
@@ -1988,12 +2600,18 @@ async function importTxt(file) {
   try {
     const text = await file.text();
     const parsed = parseOrbitText(text);
-    const imported = parsed.map((item, index) => buildOrbitRecord(item, {
+    const version = ++workspaceOperation;
+    const imported = await buildOrbitRecordsFromSerialized(parsed.map((item, index) => ({
       id: uuid(),
       color: nextOrbitColor(index),
       visible: true,
-    }));
+      elements: item,
+    })));
+    if (version !== workspaceOperation) throw new Error('场景已更新，忽略过期导入。');
     state.orbits = imported;
+    persistenceReady = true;
+    state.isPlaying = false;
+    state.elapsedSeconds = 0;
     setSelectedOrbitIds(imported[0] ? [imported[0].id] : [], { currentId: imported[0]?.id ?? null });
     state.editingId = null;
     state.currentAssetId = null;
@@ -2011,13 +2629,52 @@ async function importTxt(file) {
 }
 
 function bindEvents() {
+  document.getElementById('task-table')?.addEventListener('toggle', () => { renderTaskTable(backend); scene.resize(); saveState(); });
+  document.getElementById('timeline-scrubber')?.addEventListener('input', (event) => {
+    state.isPlaying = false;
+    state.runStartedAtMs = null;
+    state.elapsedSeconds = Number(event.target.value);
+    clearGroundTrackHistories();
+    clearVectorCalibration();
+    updateTimeReadout();
+    els.playToggle.disabled = false; els.pauseButton.disabled = true;
+  });
+  document.getElementById('load-demo-button')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const base = { semiMajorAxisKm: 8000, eccentricity: 0.001, inclinationDeg: 51.6, raanDeg: 40, argPeriapsisDeg: 30, trueAnomalyDeg: 0 };
+      await applyWorkbenchSnapshot({ orbits: [
+        { id: uuid(), name: 'LEO-01', color: DEFAULT_ORBIT_COLORS[0], visible: true, elements: base },
+        { id: uuid(), name: 'POLAR-02', color: DEFAULT_ORBIT_COLORS[1], visible: true, elements: { ...base, semiMajorAxisKm: 8800, eccentricity: .03, inclinationDeg: 98, raanDeg: 112, trueAnomalyDeg: 135 } },
+        { id: uuid(), name: 'ELLIPTIC-03', color: DEFAULT_ORBIT_COLORS[2], visible: true, elements: { ...base, semiMajorAxisKm: 10800, eccentricity: .25, inclinationDeg: 27, raanDeg: 205, trueAnomalyDeg: 230 } },
+      ] });
+      state.currentAssetId = null; state.isSceneDirty = true;
+      renderUi(); saveState();
+    } catch (error) { showErrors(error.message); }
+    finally { document.getElementById('load-demo-button').disabled = false; }
+  });
+  window.addEventListener('pagehide', flushSavedState);
+  document.getElementById('backend-retry')?.addEventListener('click', async () => {
+    if (!(await backend.checkHealth())) return;
+    clearErrors();
+    if (!persistenceReady && state.orbits.length === 0) {
+      persistenceReady = (await restoreState()) !== false;
+    }
+    ensureBackendReferences();
+    frameRetryAt = 0;
+    renderUi();
+  });
+  document.getElementById('backend-cancel')?.addEventListener('click', () => {
+    backend.cancel().catch((error) => showErrors(error.message));
+  });
+  new ResizeObserver(() => scene.resize()).observe(els.canvas);
   document.addEventListener('pointerdown', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (!target.closest('.status-card')) closeStatusCards();
     if (!target.closest('#simulation-run-control')) setRunLimitMenuOpen(false);
-    const moduleSurface = target.closest('.side-module-panel, .ground-track-panel, .bottom-module-panel, .module-sidebar, .info-dialog, #simulation-run-control, .bottom-console');
-    if (!moduleSurface && state.activeModule && !state.modulePins[state.activeModule]) closeActiveModule();
+    // Unpinned drawers close on an outside click; views stay put.
+    const moduleSurface = target.closest('.side-module-panel, .module-sidebar, .info-dialog, .cfly, .dd');
+    if (!moduleSurface && (state.activeModule === 'info' || (DRAWER_MODULES.has(state.activeModule) && !state.modulePins[state.activeModule]))) closeActiveModule();
   });
 
   for (const button of els.moduleButtons) {
@@ -2085,16 +2742,8 @@ function bindEvents() {
     toggleCalibrationResultExpansion(toggleButton.dataset.calibrationToggleResult);
   });
 
-  for (const card of document.querySelectorAll('.status-card')) {
-    card.addEventListener('click', (event) => {
-      if (event.button !== 0) return;
-      event.stopPropagation();
-      if (event.target instanceof Element && event.target.closest('.status-menu')) return;
-      toggleStatusCard(card);
-    });
-    card.addEventListener('pointerleave', () => {
-      card.classList.remove('is-click-closed');
-    });
+  for (const button of document.querySelectorAll('[data-module-close]')) {
+    button.addEventListener('click', closeActiveModule);
   }
 
   for (const button of document.querySelectorAll('[data-frame-option]')) {
@@ -2121,8 +2770,6 @@ function bindEvents() {
     });
   }
 
-  els.closeDrawer.addEventListener('click', closeActiveModule);
-
   els.color.picker.addEventListener('input', () => setColorFields(els.color.picker.value));
   els.color.hex.addEventListener('input', () => {
     if (/^#?[\da-f]{6}$/i.test(els.color.hex.value.trim())) setColorFields(els.color.hex.value);
@@ -2133,16 +2780,20 @@ function bindEvents() {
     });
   }
 
-  els.form.addEventListener('submit', (event) => {
+  els.form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    const version = ++workspaceOperation;
+    els.submitButton.disabled = true;
     try {
       const raw = formToElements();
       const existingIndex = state.orbits.findIndex((orbit) => orbit.id === state.editingId);
-      const record = buildOrbitRecord(raw, {
+      const record = await buildOrbitRecord(raw, {
         id: state.editingId ?? undefined,
         color: getFormColor(),
         visible: existingIndex >= 0 ? state.orbits[existingIndex].visible : true,
       });
+      if (version !== workspaceOperation) throw new Error('场景已更新，忽略过期计算。');
+      persistenceReady = true;
       if (existingIndex >= 0) {
         state.orbits.splice(existingIndex, 1, record);
         clearGroundTrackHistories(record.id);
@@ -2158,10 +2809,16 @@ function bindEvents() {
       saveState();
     } catch (error) {
       showErrors(error.errors ?? error.message);
-    }
+    } finally { els.submitButton.disabled = false; }
   });
 
-  els.clearForm.addEventListener('click', resetForm);
+  els.clearForm.addEventListener('click', clearFormInputs);
+  els.editCancel.addEventListener('click', cancelEdit);
+  els.selectedOrbitPeriodCell.addEventListener('click', cyclePeriodUnit);
+  initColorFlyout({ palette: DEFAULT_ORBIT_COLORS, onPick: setColorFields });
+  // Run and pause share one slot (the disabled one is hidden), so hand focus across.
+  els.playToggle.addEventListener('click', () => { if (document.activeElement === els.playToggle) els.pauseButton.focus(); });
+  els.pauseButton.addEventListener('click', () => { if (document.activeElement === els.pauseButton) els.playToggle.focus(); });
   els.playToggle.addEventListener('click', startPlayback);
   els.runLimitToggle.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -2171,6 +2828,9 @@ function bindEvents() {
   els.runDurationLimit.addEventListener('change', () => {
     syncRunLimitFromInput();
     els.runDurationLimit.value = String(state.runLimitSeconds);
+  });
+  els.runDurationLimit.addEventListener('input', () => {
+    els.runLimitValue.textContent = state.runLimitSeconds > 0 ? `${state.runLimitSeconds}s` : '∞';
   });
   els.pauseButton.addEventListener('click', pausePlayback);
   els.resetTime.addEventListener('click', () => {
@@ -2196,11 +2856,17 @@ function bindEvents() {
   els.groundTrackModeToggle.addEventListener('click', () => {
     setGroundTrackPanel(state.groundTrackPanel === 'fullscreen' ? 'window' : 'fullscreen');
   });
-  els.groundTrackMinimize.addEventListener('click', () => setGroundTrackPanel('minimized', { confirmClose: false }));
+  els.groundTrackMinimize.addEventListener('click', () => setGroundTrackPanel(state.groundTrackPanel === 'minimized' ? 'window' : 'minimized', { confirmClose: false }));
   els.groundTrackClose.addEventListener('click', () => setGroundTrackPanel('closed'));
+  els.groundTrackReopen.addEventListener('click', () => setGroundTrackPanel('window'));
+  els.groundTrackStats.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-region-action]');
+    if (button) handleRegionAction(button.dataset.regionAction);
+  });
   els.groundTrackResetView.addEventListener('click', () => groundTrackView.resetView());
   els.simulationStartUtc.addEventListener('change', () => {
     state.simulationStartUtc = els.simulationStartUtc.value || utcDatetimeLocalValue(new Date());
+    scene.setEpoch?.(utcMsFromInput(state.simulationStartUtc, Date.now()));
     markSceneDirty();
     clearGroundTrackHistories();
     syncGroundTrackHistories();
@@ -2239,6 +2905,17 @@ function bindEvents() {
       saveState();
     });
   }
+  // dragging the memory slider switches to the custom preset, as in the prototype
+  els.customMemory.addEventListener('input', () => {
+    if (els.performanceMode.value !== 'custom') els.performanceMode.value = 'custom';
+    syncPerformanceFromControls();
+  });
+  els.frameRateLimit.addEventListener('change', () => {
+    const value = Number(els.frameRateLimit.value);
+    state.frameRateLimit = FRAME_RATE_LIMITS.includes(value) ? value : 60;
+    renderSettingsReadouts();
+    saveState();
+  });
   for (const input of [
     els.groundTrackHighlightLongitude,
     els.groundTrackHighlightLatitude,
@@ -2259,19 +2936,21 @@ function bindEvents() {
   els.assetSaveGroup.addEventListener('click', saveCurrentAssetGroup);
   els.assetRenameGroup.addEventListener('click', () => renameAssetGroup());
   els.exportGroundTrackPng.addEventListener('click', exportGroundTrackPng);
+  els.groundTrackCsv?.addEventListener('click', () => downloadText(
+    `${state.exportNamePrefix || 'ground-track'}-${currentTimestampLabel()}.csv`,
+    '\uFEFF' + groundTrackCsv(state.groundTrackTracks), 'text/csv;charset=utf-8',
+  ));
   els.infoClose.addEventListener('click', closeActiveModule);
-  els.infoModal.addEventListener('pointerdown', (event) => {
-    if (event.target === els.infoModal) closeActiveModule();
-  });
-  els.consoleClose.addEventListener('click', closeActiveModule);
   els.exitPage.addEventListener('click', () => {
     saveState();
     window.close();
   });
-  els.screenshotButton.addEventListener('click', async () => {
+  const downloadSceneScreenshot = async () => {
     const png = await composeScreenshotDataUrl();
     downloadDataUrl(`eci-orbit-scene-${currentTimestampLabel()}.png`, png);
-  });
+  };
+  els.screenshotButton.addEventListener('click', downloadSceneScreenshot);
+  document.getElementById('ground-track-screenshot')?.addEventListener('click', downloadSceneScreenshot);
   els.exportJson.addEventListener('click', exportJson);
   els.importJson.addEventListener('change', () => importJson(els.importJson.files[0]));
   els.importTxt.addEventListener('change', () => importTxt(els.importTxt.files[0]));
@@ -2286,14 +2965,77 @@ function bindEvents() {
   });
   groundTrackView.setRegionSelectedCallback((bounds) => {
     const stats = groundTrackRegionStats(state.groundTrackTracks, bounds);
+    regionSequence += 1;
     renderGroundTrackStats(stats);
-    groundTrackView.setSelectionStats(stats);
+    els.groundTrackStatsPanel.classList.remove('flash'); void els.groundTrackStatsPanel.offsetWidth;
+    els.groundTrackStatsPanel.classList.add('flash');
+    setTimeout(() => els.groundTrackStatsPanel.classList.remove('flash'), 900);
   });
   scene.setOrbitHoverCallback(showOrbitTooltip);
+  // clicking an orbit in the schematic selects it on its own (prototype interaction)
+  scene.setOrbitClickCallback?.((id) => {
+    setSelectedOrbitIds([id], { currentId: id });
+    renderUi();
+    saveState();
+  });
+  document.addEventListener('keydown', handleShortcut);
 }
 
+// Escape peels back one layer; 1/2/3, Space, R and F/T/0 drive views, playback and camera.
+function handleShortcut(event) {
+  if (event.key === 'Escape') {
+    if (document.querySelector('.dd-btn[aria-expanded="true"]')) { closeDropdowns(); return; }
+    if (colorFlyoutOpen()) { setColorFlyout(false); els.color.preview.closest('button')?.focus(); return; }
+    if (!els.runLimitMenu.hidden) { setRunLimitMenuOpen(false); els.runLimitToggle.focus(); return; }
+    if (state.activeModule) closeActiveModule();
+    return;
+  }
+  if (event.target.closest?.('input, select, textarea, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (state.activeModule === 'info') return;
+  const key = event.key.toLowerCase();
+  if (key === ' ' && !event.target.closest?.('button, a, [role="slider"], summary')) {
+    event.preventDefault();
+    if (state.isPlaying) pausePlayback(); else startPlayback();
+  } else if (key === 'r') els.resetTime.click();
+  else if (key === '1') setActiveView('workbench');
+  else if (key === '2') setActiveView('groundTrack');
+  else if (key === '3') setActiveView('console');
+  else if (state.activeView === 'workbench' && key === 'f') scene.setView('front');
+  else if (state.activeView === 'workbench' && key === 't') scene.setView('top');
+  else if (state.activeView === 'workbench' && key === '0') scene.setView('default');
+}
+
+// Bottom-bar PWR / TEMP come from real backend load: the larger of frame compute time over the
+// frame interval and worker-thread occupancy. PWR is the headroom left; TEMP follows the load
+// slowly (36–47) like a thermal reading, so short spikes do not flicker it.
+const computeLoad = { frame: 0, frameAt: 0, level: 0, heat: 0 };
+function updateComputeTelemetry(nowMs) {
+  const health = backend.health ?? {};
+  const workers = Number(health.workers);
+  const threads = workers > 0 ? Math.min(1, Number(health.running ?? 0) / workers) : 0;
+  const frame = state.isPlaying && nowMs - computeLoad.frameAt < 1000 ? computeLoad.frame : 0;
+  computeLoad.level += (Math.max(frame, threads) - computeLoad.level) * 0.35;
+  computeLoad.heat += (computeLoad.level - computeLoad.heat) * 0.03;
+  if (els.telemetryPower) els.telemetryPower.textContent = backend.health ? `${(100 - computeLoad.level * 100).toFixed(1)}%` : '—';
+  if (els.telemetryTemp) els.telemetryTemp.textContent = backend.health ? `${(36 + computeLoad.heat * 11).toFixed(1)}°C` : '—';
+}
+
+let frameMsAverage = 16.7;
+let telemetryAt = 0;
+let paintedAt = 0;
 function tick(nowMs) {
-  const deltaSeconds = Math.min(0.1, Math.max(0, (nowMs - state.lastFrameMs) / 1000));
+  requestAnimationFrame(tick);
+  // frame-rate cap: skip display refreshes that arrive early (1 ms slack so a 60 FPS cap on a
+  // 60 Hz display never drops frames); the paint clock advances in whole frame steps
+  const frameMs = state.frameRateLimit > 0 ? 1000 / state.frameRateLimit : 0;
+  if (frameMs && nowMs - paintedAt < frameMs - 1) return;
+  paintedAt = frameMs && nowMs - paintedAt < frameMs * 2 ? paintedAt + frameMs : nowMs;
+  frameMsAverage += (nowMs - state.lastFrameMs - frameMsAverage) * 0.08;
+  if (nowMs - telemetryAt > 250) {
+    telemetryAt = nowMs;
+    if (els.telemetryFrame) els.telemetryFrame.textContent = `${Math.max(0, frameMsAverage).toFixed(1)}ms`;
+    updateComputeTelemetry(nowMs);
+  }
   state.lastFrameMs = nowMs;
   if (state.isPlaying) {
     const elapsedRunSeconds = state.runStartedAtMs === null ? 0 : (nowMs - state.runStartedAtMs) / 1000;
@@ -2301,23 +3043,30 @@ function tick(nowMs) {
       state.isPlaying = false;
       state.runStartedAtMs = null;
       renderUi();
-    } else {
-      state.elapsedSeconds += deltaSeconds * state.speedFactor;
     }
   }
+  requestComputedFrame(nowMs);
   updateTimeReadout();
   scene.update(state.orbits, state.elapsedSeconds, state.perturbationModel);
-  if (state.orbits.length > 0) renderMetrics();
-  syncGroundTrackHistories();
-  if (state.groundTrackPanel !== 'closed') renderGroundTrack();
-  requestAnimationFrame(tick);
 }
 
 if (!state.simulationStartUtc) state.simulationStartUtc = utcDatetimeLocalValue(new Date());
+initI18n();
+initDropdowns();
+initSegmentedSelects();
+initPanelToggles();
+initListFades();
+initMotes();
 restoreAssetLibrary();
-restoreState();
+renderGroundTrackStats(null);
 bindEvents();
-setOverlaysFromInputs({ markDirty: false });
-if (DEFAULT_ORBIT_COLORS.length > 0 && !state.editingId) setNextFormColor();
 renderUi();
 requestAnimationFrame(tick);
+backend.checkHealth().then(async () => {
+  const restored = await restoreState();
+  persistenceReady = persistenceReady || restored !== false;
+  setOverlaysFromInputs({ markDirty: false });
+  if (DEFAULT_ORBIT_COLORS.length > 0 && !state.editingId) setNextFormColor();
+  renderUi();
+});
+setInterval(() => backend.checkHealth(), 5000);

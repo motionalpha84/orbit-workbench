@@ -1,514 +1,503 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-lang="zh">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>轨道模拟工作台</title>
-    <link rel="preload" href="./vendor/three.module.js" as="script" crossorigin="anonymous" />
+    <meta name="theme-color" content="#E7EEED" />
+    <meta name="description" content="轨道仿真工作台 v0.2.0：本机后台计算、实时三维显示的轨道仿真工作台。" />
+    <title>轨道仿真工作台 v0.2.0</title>
+    <link rel="preload" href="./assets/fonts/chakra-petch-700.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body class="module-workbench-open">
-    <main class="app-shell">
-      <section class="viewport" aria-label="ECI 三维轨道场景">
-        <canvas id="scene-canvas"></canvas>
-        <div class="top-bar" aria-label="场景状态">
-          <div>
-            <p class="eyebrow">Orbit Simulation Workbench</p>
-            <h1>轨道模拟工作台</h1>
-          </div>
-          <div class="status-grid">
-            <section class="status-card frame-status" aria-label="当前坐标系" tabindex="0">
-              <span>当前坐标系</span>
-              <strong id="frame-value">ECI</strong>
-              <div class="status-menu" role="menu" aria-label="坐标系选项">
-                <button class="status-option is-active" type="button" data-frame-option="ECI">ECI 坐标系</button>
-                <button class="status-option" type="button" data-frame-option="ECEF">ECEF 坐标系</button>
-              </div>
-            </section>
-            <section class="status-card body-status" aria-label="中心天体" tabindex="0">
-              <span>中心天体</span>
-              <strong id="body-value">地球</strong>
-              <div class="status-menu body-model-menu" role="menu" aria-label="中心天体模型">
-                <button class="status-option is-active body-option" type="button" data-body-option="earth">地球</button>
-                <div class="status-submenu" aria-label="动力学模型">
-                  <button class="status-option is-active" type="button" data-perturbation-model="two-body">无摄动（二体运动）</button>
-                  <button class="status-option" type="button" data-perturbation-model="j2">J2 摄动</button>
-                  <button class="status-option" type="button" data-perturbation-model="j3">J3 摄动</button>
-                </div>
-              </div>
-            </section>
-            <section class="status-card orbit-status" aria-label="当前仿真轨道数" tabindex="0">
-              <span>当前仿真轨道数</span>
-              <strong id="orbit-count">0</strong>
-              <div id="status-orbit-menu" class="status-menu status-orbit-list" role="menu" aria-label="当前显示轨道"></div>
-            </section>
-          </div>
-        </div>
+  <body>
+    <canvas class="motes" id="motes" aria-hidden="true"></canvas>
+    <div class="app" id="app">
+      <!-- ===== top bar: identity left, empty centre, language + compute link right ===== -->
+      <header class="strip">
+        <a class="app-id" href="./" aria-label="轨道仿真工作台 v0.2.0 首页">
+          <span class="app-icon" aria-hidden="true">
+            <!-- emblem: an armour-slate plate; a world, its orbit ring, and a firefly riding the near arc -->
+            <svg viewBox="0 0 40 40">
+              <defs>
+                <linearGradient id="iPlate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E444C"/><stop offset="1" stop-color="#17242A"/></linearGradient>
+                <linearGradient id="iRing" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#C3F2E8" stop-opacity=".35"/><stop offset=".5" stop-color="#8FE3D3"/><stop offset="1" stop-color="#67CFE3"/></linearGradient>
+                <linearGradient id="iWorld" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FAFCFC"/><stop offset="1" stop-color="#AFC8C5"/></linearGradient>
+                <linearGradient id="iTrail" gradientUnits="userSpaceOnUse" x1="33" y1="14.6" x2="28.4" y2="22.6"><stop offset="0" stop-color="#EEF7A6" stop-opacity="0"/><stop offset="1" stop-color="#EEF7A6"/></linearGradient>
+                <radialGradient id="iGlow"><stop offset="0" stop-color="#FBFDE6"/><stop offset=".3" stop-color="#EEF7A6" stop-opacity=".9"/><stop offset="1" stop-color="#EEF7A6" stop-opacity="0"/></radialGradient>
+              </defs>
+              <path d="M0 0h31l9 9v31H9l-9-9z" fill="url(#iPlate)"/>
+              <path d="M1.5 1.5h28.9l8.1 8.1v28.9H9.6l-8.1-8.1z" fill="none" stroke="#8FE3D3" stroke-opacity=".28"/>
+              <ellipse cx="20" cy="21" rx="16.5" ry="9.5" transform="rotate(18 20 21)" fill="none" stroke="#C3F2E8" stroke-opacity=".32" stroke-width=".8" stroke-dasharray="1 2.4"/>
+              <ellipse cx="20" cy="21" rx="14" ry="5.6" transform="rotate(-24 20 21)" fill="none" stroke="#8FE3D3" stroke-opacity=".4" stroke-width="1.2"/>
+              <circle cx="20" cy="21" r="5.4" fill="url(#iWorld)"/>
+              <path d="M20 15.6a5.4 5.4 0 0 1 0 10.8a2.6 5.4 0 0 0 0-10.8z" fill="#2E8F82" opacity=".45"/>
+              <path class="ring" d="M32.79 15.31A14 5.6 -24 0 1 7.21 26.69" fill="none" stroke="url(#iRing)" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M32.79 15.31A14 5.6 -24 0 1 28.4 22.6" fill="none" stroke="url(#iTrail)" stroke-width="2.4" stroke-linecap="round"/>
+              <circle class="mote" cx="28.4" cy="22.6" r="5.6" fill="url(#iGlow)"/>
+              <circle cx="28.4" cy="22.6" r="1.5" fill="#FBFDE6"/>
+              <path d="M9.5 6.5l.8 2.4 2.4.8-2.4.8-.8 2.4-.8-2.4-2.4-.8 2.4-.8z" fill="#C3F2E8"/>
+            </svg>
+          </span>
+          <span class="app-name"><span class="t" data-en="Orbit Workbench">轨道仿真工作台<span class="v" data-i18n-skip>v0.2.0</span></span><span class="s" data-i18n-skip>ORBIT WORKBENCH</span></span>
+        </a>
+        <span class="sp"></span>
+        <div class="lang" role="group" aria-label="界面语言" data-i18n-skip><button type="button" data-lang-set="en" aria-pressed="false">EN</button><button type="button" data-lang-set="zh" aria-pressed="true">简中</button></div>
+        <span id="backend-status" class="conn connection-badge" data-state="offline" role="status"><i aria-hidden="true"></i><span id="backend-status-text">LINK LOST · 计算服务未连接</span></span>
+      </header>
 
-        <div id="empty-state" class="empty-state">
-          <p>输入轨道设置后生成轨迹</p>
-          <span>a, e, i, Ω, ω, ν</span>
-        </div>
-        <div id="orbit-tooltip" class="orbit-tooltip" hidden></div>
-
-        <div class="bottom-console" aria-label="仿真控制">
-          <div class="bottom-control-stack">
-            <div class="bottom-control-row time-control-row">
-              <div class="simulation-time-panel time-readout" tabindex="0" title="双击切换时间单位">
-                <span>模拟仿真时刻</span>
-                <strong id="time-readout">0.00 s</strong>
-              </div>
-            </div>
-            <div class="bottom-control-row view-control-row">
-              <div class="view-control-group" aria-label="视角控制">
-                <button id="front-view" class="control-button" type="button">正视图</button>
-                <button id="top-view" class="control-button" type="button">俯视图</button>
-                <button id="reset-view" class="control-button" type="button">视角重置</button>
-              </div>
-            </div>
-            <div class="bottom-control-row action-control-row">
-              <div id="simulation-run-control" class="playback-row run-control">
-                <button id="play-toggle" class="run-button" type="button" aria-label="运行">
-                  <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M8 5v14l11-7z"></path>
-                  </svg>
-                  <span>运行</span>
-                </button>
-                <button
-                  id="run-limit-toggle"
-                  class="run-limit-toggle"
-                  type="button"
-                  aria-label="限制仿真时长"
-                  aria-expanded="false"
-                  aria-controls="run-limit-menu"
-                >
-                  <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m6 9 6 6 6-6"></path>
-                  </svg>
-                </button>
-                <div id="run-limit-menu" class="run-limit-menu" role="menu" hidden>
-                  <label>
-                    <span>现实运行时长 / s</span>
-                    <input id="run-duration-limit" type="number" min="0" step="1" value="0" inputmode="numeric" />
-                  </label>
-                  <small>0 表示不限时</small>
-                </div>
-              </div>
-              <label class="speed-control compact-speed-control">
-                <span>速度倍率</span>
-                <select id="speed-factor">
-                  <option value="1">1x</option>
-                  <option value="60" selected>60x (1min/s)</option>
-                  <option value="600">600x</option>
-                  <option value="3600">3600x (1hr/s)</option>
-                  <option value="6000">6000x</option>
-                  <option value="86400">86400X (1day/s)</option>
-                </select>
-              </label>
-              <div class="playback-row icon-playback-row">
-                <button id="pause-button" class="icon-control-button" type="button" aria-label="暂停" title="暂停">
-                  <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M9 6v12"></path>
-                    <path d="M15 6v12"></path>
-                  </svg>
-                </button>
-                <button id="reset-time" class="icon-control-button" type="button" aria-label="重置" title="重置">
-                  <svg class="button-icon reset-icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path class="reset-icon-arc" d="M6.1 17.3A8.2 8.2 0 1 0 7.2 5.6"></path>
-                    <path class="reset-icon-head" d="M4.4 2.8 2.3 13.7 12.5 10.8z"></path>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <aside id="ground-track-panel" class="ground-track-panel" aria-label="星下点地图">
-          <div class="ground-track-header">
-            <div>
-              <p class="eyebrow">Ground Track Map</p>
-              <h2>星下点地图</h2>
-            </div>
-            <div class="ground-track-toolbar" aria-label="星下点地图工具">
-              <button class="pin-button" type="button" aria-label="固定星下点" data-module-pin="groundTrack" aria-pressed="false">
-                <svg class="button-icon pin-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M7 17h10"></path><path d="M8 5h8"></path><path d="M9 5v5.4c0 .8-.5 1.5-1.2 1.8L6 13.1V17h12v-3.9l-1.8-.9c-.7-.3-1.2-1-1.2-1.8V5"></path></svg>
-              </button>
-              <button id="ground-track-minimize" class="icon-control-button" type="button" aria-label="最小化星下点模块" title="最小化">
-                <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
-              </button>
-              <button id="ground-track-mode-toggle" class="icon-control-button" type="button" aria-label="切换窗口或全屏" title="窗口 / 全屏">
-                <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5"></path><path d="M20 9V4h-5"></path><path d="M4 15v5h5"></path><path d="M20 15v5h-5"></path></svg>
-              </button>
-              <button id="ground-track-close" class="icon-control-button" type="button" aria-label="关闭星下点模块" title="关闭">×</button>
-            </div>
-          </div>
-          <div class="ground-track-body">
-            <section class="ground-track-map-shell" aria-label="星下点等经纬度地图">
-              <canvas id="ground-track-canvas"></canvas>
-              <div id="ground-track-map-tooltip" class="ground-track-map-tooltip" hidden></div>
-              <div id="ground-track-selection-summary" class="ground-track-selection-summary" hidden></div>
-            </section>
-            <aside class="ground-track-sidebar" aria-label="星下点地图设置">
-              <section class="ground-track-section-panel">
-                <h3>星下点轨迹选择</h3>
-                <div id="ground-track-filter-list" class="ground-track-filter-list"></div>
-              </section>
-              <section class="ground-track-section-panel">
-                <h3>轨迹显示设置</h3>
-                <label>
-                  <span>轨迹显示逻辑</span>
-                  <select id="ground-track-window-mode">
-                    <option value="revs" selected>按圈数</option>
-                    <option value="time">按时间</option>
-                  </select>
-                </label>
-                <div class="ground-track-window-grid">
-                  <label>
-                    <span>保留圈数</span>
-                    <input id="ground-track-past-revs" type="number" min="0" step="1" value="2" />
-                  </label>
-                  <label>
-                    <span>保留时间</span>
-                    <input id="ground-track-retention-time" type="number" min="0" step="any" value="60" />
-                  </label>
-                  <label>
-                    <span>时间单位</span>
-                    <select id="ground-track-retention-unit">
-                      <option value="s">s</option>
-                      <option value="min" selected>min</option>
-                      <option value="hr">hr</option>
-                      <option value="day">day</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="ground-track-highlight-grid">
-                  <label class="toggle-row"><input id="ground-track-highlight-longitude" type="checkbox" /> 经线突出显示</label>
-                  <label class="toggle-row"><input id="ground-track-highlight-latitude" type="checkbox" /> 纬线突出显示</label>
-                  <label class="toggle-row"><input id="ground-track-highlight-equator" type="checkbox" checked /> 赤道线突出显示</label>
-                  <label class="toggle-row"><input id="ground-track-cursor-guides" type="checkbox" checked /> 鼠标经纬辅助线</label>
-                </div>
-              </section>
-              <section class="ground-track-section-panel">
-                <h3>区域统计</h3>
-                <div id="ground-track-stats" class="ground-track-stats">框选地图区域后显示统计。</div>
-              </section>
-            </aside>
-            <button id="ground-track-reset-view" class="control-button ground-track-reset-corner" type="button">视角重置</button>
-          </div>
-        </aside>
-
-        <aside id="console-panel" class="bottom-module-panel console-panel" aria-label="控制台模块">
-          <div class="module-panel-header">
-            <div>
-              <p class="eyebrow">Console</p>
-              <h2>控制台</h2>
-            </div>
-            <button id="console-close" class="icon-control-button" type="button" aria-label="关闭控制台">×</button>
-          </div>
-          <div class="empty-module-surface"></div>
-        </aside>
-
-        <div id="info-modal" class="info-modal" hidden>
-          <section class="info-dialog" aria-label="说明">
-            <div class="module-panel-header">
-              <div>
-                <p class="eyebrow">Help</p>
-                <h2>说明</h2>
-              </div>
-              <button id="info-close" class="icon-control-button" type="button" aria-label="关闭说明">×</button>
-            </div>
-            <div class="empty-module-surface"></div>
-          </section>
-        </div>
-      </section>
-
-      <nav id="module-sidebar" class="module-sidebar" aria-label="模块侧栏">
-        <div class="module-sidebar-group">
-          <button class="module-nav-button is-active" type="button" data-module-nav="workbench" aria-label="工作台">
-            <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v5H5z"></path><path d="M5 14h6v5H5z"></path><path d="M15 14h4v5h-4z"></path></svg>
-            <span>工作台</span>
-          </button>
-          <button class="module-nav-button" type="button" data-module-nav="groundTrack" aria-label="星下点">
-            <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0z"></path><path d="M4 12h16"></path><path d="M12 4c2.2 2.4 3.3 5.1 3.3 8S14.2 17.6 12 20"></path><path d="M12 4c-2.2 2.4-3.3 5.1-3.3 8S9.8 17.6 12 20"></path></svg>
-            <span>星下点</span>
-          </button>
-          <button class="module-nav-button" type="button" data-module-nav="assets" aria-label="资产">
-            <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h6l2 2h8v10H4z"></path><path d="M4 7v12"></path></svg>
-            <span>资产</span>
-          </button>
-        </div>
-        <div class="module-sidebar-group module-sidebar-bottom">
-          <button class="module-nav-button" type="button" data-module-nav="info" aria-label="说明">
-            <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v-5"></path><path d="M12 8h.01"></path><path d="M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0z"></path></svg>
-            <span>说明</span>
-          </button>
-          <button class="module-nav-button" type="button" data-module-nav="console" aria-label="控制台">
-            <svg class="module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 8 4 4-4 4"></path><path d="M11 17h8"></path></svg>
-            <span>控制台</span>
-          </button>
-          <button class="module-nav-button" type="button" data-module-nav="settings" aria-label="设置">
-            <svg class="module-nav-icon settings-gear-icon" viewBox="0 0 24 24" aria-hidden="true"><path class="gear-teeth" d="M9.1 5L10.1 2.3L13.9 2.3L14.9 5L17.5 3.8L20.2 6.5L19 9.1L21.7 10.1L21.7 13.9L19 14.9L20.2 17.5L17.5 20.2L14.9 19L13.9 21.7L10.1 21.7L9.1 19L6.5 20.2L3.8 17.5L5 14.9L2.3 13.9L2.3 10.1L5 9.1L3.8 6.5L6.5 3.8L9.1 5z"></path><circle class="gear-hub" cx="12" cy="12" r="3.1"></circle></svg>
-            <span>设置</span>
-          </button>
-        </div>
+      <!-- ===== icon spine: three views, then drawers ===== -->
+      <nav id="module-sidebar" class="spine module-sidebar" aria-label="模块侧栏">
+        <button class="nav module-nav-button" type="button" data-module-nav="workbench" aria-label="工作台">
+          <svg class="ni module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4"></circle><ellipse cx="12" cy="12" rx="9.5" ry="3.8" transform="rotate(-24 12 12)"></ellipse><circle cx="19.8" cy="8.3" r="1.2"></circle></svg>
+          <span class="nz" data-en="Deck">工作台</span><span class="ne" data-i18n-skip>DECK</span>
+        </button>
+        <button class="nav module-nav-button" type="button" data-module-nav="groundTrack" aria-label="星下点">
+          <svg class="ni module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.5 12h17"></path><path d="M12 3.5c2.3 2.5 3.4 5.3 3.4 8.5s-1.1 6-3.4 8.5c-2.3-2.5-3.4-5.3-3.4-8.5s1.1-6 3.4-8.5z"></path></svg>
+          <span class="nz" data-en="Track">星下点</span><span class="ne" data-i18n-skip>TRACK</span>
+        </button>
+        <button class="nav module-nav-button" type="button" data-module-nav="console" aria-label="任务">
+          <svg class="ni module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8.5 4.5L12 12 3.5 7.5z"></path><path d="M3.5 12L12 16.5 20.5 12"></path><path d="M3.5 16.5L12 21l8.5-4.5"></path></svg>
+          <span class="nz" data-en="Queue">任务</span><span class="ne" data-i18n-skip>QUEUE</span>
+        </button>
+        <div class="spine-sep" aria-hidden="true"></div>
+        <button class="nav module-nav-button ovl" type="button" data-module-nav="assets" aria-label="资产">
+          <svg class="ni module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4.5h18v4.5H3z"></path><path d="M4.8 9v10.5h14.4V9"></path><path d="M9.5 13h5"></path></svg>
+          <span class="nz" data-en="Assets">资产</span><span class="ne" data-i18n-skip>ASSET</span>
+        </button>
+        <button class="nav module-nav-button ovl" type="button" data-module-nav="calibration" aria-label="矢量标定">
+          <svg class="ni module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><circle cx="12" cy="12" r="1.8"></circle><path d="M12 2v5M12 17v5M2 12h5M17 12h5"></path></svg>
+          <span class="nz" data-en="Calib">标定</span><span class="ne" data-i18n-skip>CALIB</span>
+        </button>
+        <button class="nav module-nav-button ovl" type="button" data-module-nav="settings" aria-label="设置">
+          <svg class="ni module-nav-icon settings-gear-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6h9.5M18 6h2.5M3.5 12h3M11 12h9.5M3.5 18h11.5M19 18h1.5"></path><path d="M13 3.8h5v4.4h-5zM6.5 9.8h4.5v4.4H6.5zM15 15.8h4v4.4h-4z"></path></svg>
+          <span class="nz" data-en="Config">设置</span><span class="ne" data-i18n-skip>CONF</span>
+        </button>
+        <button class="nav module-nav-button ovl" type="button" data-module-nav="info" aria-label="说明">
+          <svg class="ni module-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.4 9.4a2.7 2.7 0 1 1 3.8 2.5c-.8.4-1.2 1-1.2 1.9v.6"></path><path d="M12 16.6v1.4"></path></svg>
+          <span class="nz" data-en="Help">说明</span><span class="ne" data-i18n-skip>HELP</span>
+        </button>
+        <div class="spine-foot" aria-hidden="true"><i id="spine-dot"></i><span class="vt" data-i18n-skip>SYS.VER // 0.2.0</span></div>
       </nav>
 
-      <aside id="workbench" class="workbench side-module-panel" data-module-panel="workbench" aria-label="轨道工作台">
-        <div class="module-panel-header workbench-header">
-          <div>
-            <p class="eyebrow">Orbit Settings</p>
-            <h2>工作台</h2>
-          </div>
-          <div class="workbench-controls">
-            <button id="pin-workbench" class="pin-button is-pinned" type="button" aria-label="固定工作台" data-module-pin="workbench" aria-pressed="true">
-              <svg class="button-icon pin-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M7 17h10"></path><path d="M8 5h8"></path><path d="M9 5v5.4c0 .8-.5 1.5-1.2 1.8L6 13.1V17h12v-3.9l-1.8-.9c-.7-.3-1.2-1-1.2-1.8V5"></path></svg>
-            </button>
-            <button id="close-drawer" class="icon-button" type="button" aria-label="收起工作台">×</button>
-          </div>
-        </div>
+      <div class="main">
+        <div class="views" id="views">
+          <!-- ========== VIEW 1 · DECK ========== -->
+          <section class="view deck" data-view="workbench" aria-label="轨道工作台">
+            <div class="stage viewport bk" id="stage" aria-label="三维轨道场景">
+              <div class="wm" aria-hidden="true" data-i18n-skip>ORBIT</div>
+              <div class="canvas-slot" id="deck-canvas-slot"><canvas id="scene-canvas" role="img" aria-label="轨道示意图：拖动旋转，滚轮缩放，点击轨道选中"></canvas></div>
 
-        <section class="panel simulation-start-panel">
-          <div class="panel-title">
-            <h3>仿真起始 UTC 时间</h3>
-            <span>全局时间基准</span>
-          </div>
-          <label>
-            <span>UTC</span>
-            <input id="simulation-start-utc" type="datetime-local" />
-          </label>
-        </section>
+              <section id="selected-orbit-hud" class="hud hud-sel" aria-label="当前选中轨道">
+                <button type="button" class="hud-fold" id="hud-fold" aria-expanded="true" title="收起轨道数据" aria-label="收起轨道数据"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 7.5L6 4l3.5 3.5"/></svg></button>
+                <div class="hs-top">
+                  <div class="hs-tag" data-i18n-skip><span>SELECTED</span><span class="sl">//</span><span id="selected-orbit-code">ORBIT-———</span><span class="multi" id="selected-orbit-multi"></span></div>
+                  <div class="hs-id"><span class="sw" aria-hidden="true"></span><b id="selected-orbit-name">未选择轨道</b><span class="ocls" id="selected-orbit-class" hidden></span></div>
+                </div>
+                <button type="button" class="mt per" id="selected-orbit-period-cell" title="点击切换单位 min / h / s"><span>周期<em>PERIOD</em></span><span class="mv"><b class="roll" id="selected-orbit-period"></b><i><span id="selected-orbit-period-unit" data-i18n-skip>min</span><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4.5h7.5L7.5 2.5M10 7.5H2.5l2 2"/></svg></i></span></button>
+                <div class="mt hp"><span>近地点高度<em>HP</em></span><div class="mv"><b class="fig" id="selected-orbit-periapsis"></b><i>km</i></div></div>
+                <div class="mt ha"><span>远地点高度<em>HA</em></span><div class="mv"><b class="fig" id="selected-orbit-apoapsis"></b><i>km</i></div></div>
+                <div class="mt vel"><span>速度范围<em>VEL</em></span><div class="mv"><b class="fig" id="selected-orbit-speed"></b><i>km/s</i></div></div>
+              </section>
 
-        <form id="orbit-form" class="panel form-panel">
-          <div class="panel-title">
-            <h3>轨道设置</h3>
-            <span>椭圆轨道 · 二体模型</span>
-          </div>
-          <label>
-            <span>轨道名称</span>
-            <input name="name" type="text" maxlength="32" placeholder="例如：LEO-01" autocomplete="off" />
-          </label>
-          <div class="field-grid">
-            <label>
-              <span>轨道半长轴 a / km</span>
-              <input name="semiMajorAxisKm" type="number" step="any" min="6379" placeholder="7000" required />
-            </label>
-            <label>
-              <span>偏心率 e</span>
-              <input name="eccentricity" type="number" step="any" min="0" max="0.999" placeholder="0.001" required />
-            </label>
-            <label>
-              <span>轨道倾角 i / °</span>
-              <input name="inclinationDeg" type="number" step="any" placeholder="51.6" required />
-            </label>
-            <label>
-              <span>升交点赤经 Ω / °</span>
-              <input name="raanDeg" type="number" step="any" placeholder="40" required />
-            </label>
-            <label>
-              <span>近地点幅角 ω / °</span>
-              <input name="argPeriapsisDeg" type="number" step="any" placeholder="30" required />
-            </label>
-            <label>
-              <span>真近点角 ν / °</span>
-              <input name="trueAnomalyDeg" type="number" step="any" placeholder="0" required />
-            </label>
-          </div>
-          <details class="color-panel" id="color-settings">
-            <summary class="color-summary">
-              <span>轨道颜色设置</span>
-              <span id="color-preview" class="color-preview" aria-hidden="true"></span>
-            </summary>
-            <div class="color-panel-body">
-              <label class="color-picker-row">
-                <span>色盘</span>
-                <input name="colorPicker" type="color" value="#616c8c" aria-label="轨道颜色色盘" />
-              </label>
-              <div class="color-field-grid">
-                <label>
-                  <span>R</span>
-                  <input name="colorR" type="number" min="0" max="255" step="1" value="97" />
-                </label>
-                <label>
-                  <span>G</span>
-                  <input name="colorG" type="number" min="0" max="255" step="1" value="108" />
-                </label>
-                <label>
-                  <span>B</span>
-                  <input name="colorB" type="number" min="0" max="255" step="1" value="140" />
-                </label>
-                <label>
-                  <span>Hex</span>
-                  <input name="colorHex" type="text" value="#616c8c" maxlength="7" autocomplete="off" />
-                </label>
+              <section class="hud hud-eci" id="state-vector-hud" aria-label="状态矢量">
+                <div class="hud-k"><span data-i18n-skip>STATE VECTOR · ECI ·</span> <span id="state-vector-name">—</span></div>
+                <table class="eci">
+                  <thead><tr><th></th><th>X</th><th>Y</th><th>Z</th><th></th></tr></thead>
+                  <tbody>
+                    <tr><th>位置 r</th><td id="state-px">—</td><td id="state-py">—</td><td id="state-pz">—</td><td class="u">km</td></tr>
+                    <tr class="v"><th>速度 v</th><td id="state-vx">—</td><td id="state-vy">—</td><td id="state-vz">—</td><td class="u">km/s</td></tr>
+                  </tbody>
+                </table>
+              </section>
+
+              <button type="button" class="tools-tab" id="tools-tab" aria-controls="tools-panel" aria-expanded="false" title="展开视图与图层" aria-label="展开视图与图层"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg><span data-i18n-skip>VIEW · LAYER</span></button>
+              <div class="hud tools" id="tools-panel" role="toolbar" aria-label="视图与图层">
+                <button type="button" class="tools-hide" id="tools-hide" aria-controls="tools-panel" aria-expanded="true" title="收起到左侧" aria-label="收起视图与图层"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg></button>
+                <div class="tg"><span class="mk" data-i18n-skip>VIEW</span><div class="tseg">
+                  <button id="front-view" class="tbtn" type="button" title="正视图 (F)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v10H3z"/><circle cx="8" cy="8" r="1.3"/></svg>正视图<kbd>F</kbd></button>
+                  <button id="top-view" class="tbtn" type="button" title="俯视图 (T)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><ellipse cx="8" cy="8" rx="5.5" ry="2"/></svg>俯视图<kbd>T</kbd></button>
+                  <button id="reset-view" class="tbtn" type="button" title="视角重置 (0)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 9.5A5 5 0 1 0 4.6 4.4M3.5 2v3h3"/></svg>视角重置<kbd>0</kbd></button>
+                </div></div>
+                <span class="tsep" aria-hidden="true"></span>
+                <!-- the graticule is always drawn; the remaining layers are toggles -->
+                <div class="tg"><span class="mk" data-i18n-skip>LAYER</span><div class="tlay">
+                  <label class="chip"><input id="toggle-axes" type="checkbox" checked />坐标轴</label>
+                  <label class="chip"><input id="toggle-ecliptic" type="checkbox" />黄道面</label>
+                  <label class="chip"><input id="toggle-radius" type="checkbox" checked />赤道面</label>
+                  <label class="chip" title="完整轨道淡参考"><input id="toggle-reference" type="checkbox" checked />参考轨道</label>
+                </div></div>
+              </div>
+
+              <!-- bottom-right: FRAME / MODEL / ORBITS selectors (menus open upward) -->
+              <div class="hud tblock" id="scene-settings">
+                <div class="tb-scale"><i id="scene-scale-bar"></i>R⊕ = 6378.137 km · 径向 √ 非线性刻度</div>
+                <div class="tb-sel">
+                  <div class="dd">
+                    <button type="button" class="dd-btn" id="frame-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="frame-menu" title="选择坐标系"><span data-i18n-skip>FRAME</span><b id="frame-value">ECI</b><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6l3.5 3.5L11.5 6"/></svg></button>
+                    <div class="dd-menu" id="frame-menu" role="menu" aria-label="坐标系选项" hidden>
+                      <div class="dm-h">FRAME · 坐标系</div>
+                      <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="true" data-frame-option="ECI"><i></i><b>ECI</b><small>地心惯性系</small></button>
+                      <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="false" data-frame-option="ECEF"><i></i><b>ECEF</b><small>地心地固系</small></button>
+                    </div>
+                  </div>
+                  <div class="dd">
+                    <button type="button" class="dd-btn" id="model-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu" title="选择中心天体与动力学模型"><span data-i18n-skip>MODEL</span><b id="body-value">地球 · 二体</b><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6l3.5 3.5L11.5 6"/></svg></button>
+                    <div class="dd-menu" id="model-menu" role="menu" aria-label="中心天体模型" hidden>
+                      <div class="dm-h">BODY · 中心天体</div>
+                      <button type="button" class="dd-opt status-option body-option" role="menuitemradio" aria-checked="true" data-body-option="earth"><i></i><b>地球</b><small>EARTH · R⊕ 6378.137 km</small></button>
+                      <div class="dm-h">MODEL · 动力学模型</div>
+                      <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="true" data-perturbation-model="two-body"><i></i><b>二体</b><small>无摄动（二体运动）</small></button>
+                      <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="false" data-perturbation-model="j2"><i></i><b>J2 摄动</b><small>含 J2 项</small></button>
+                      <button type="button" class="dd-opt status-option" role="menuitemradio" aria-checked="false" data-perturbation-model="j3"><i></i><b>J3 摄动</b><small>含 J2 + J3 项</small></button>
+                    </div>
+                  </div>
+                  <div class="dd">
+                    <button type="button" class="dd-btn" id="orbit-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="status-orbit-menu" title="当前显示轨道"><span data-i18n-skip>ORB</span><b id="orbit-count">0</b><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6l3.5 3.5L11.5 6"/></svg></button>
+                    <div class="dd-menu dd-orbits" role="menu" aria-label="当前显示轨道" hidden><div class="dm-h">VISIBLE · 当前显示轨道</div><div id="status-orbit-menu" class="status-orbit-list"></div></div>
+                  </div>
+                </div>
+                <div class="tb-plot" data-i18n-skip><span>PLOTTER</span><b id="scene-plotter">PLOT OK</b></div>
+              </div>
+
+              <div id="empty-state" class="empty-state">
+                <svg class="empty-orbit" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="10"/><ellipse cx="40" cy="40" rx="34" ry="13" transform="rotate(-24 40 40)"/><ellipse cx="40" cy="40" rx="26" ry="30" transform="rotate(18 40 40)" stroke-dasharray="2 5"/><circle class="node" cx="70" cy="27" r="3"/></svg>
+                <div><p>从一条轨道开始</p><span>设置六根数，或从资产导入轨道组。</span><button id="load-demo-button" class="btn pri" type="button">载入演示轨道</button></div>
+              </div>
+              <div id="orbit-tooltip" class="orbit-tooltip" hidden></div>
+            </div>
+
+            <!-- ===== ORBIT DOSSIER ===== -->
+            <aside id="workbench" class="dossier slab" aria-label="轨道档案">
+              <header class="ds-head">
+                <span class="tabcode" data-i18n-skip>A-01</span>
+                <div><div class="ds-t" data-scr>轨道档案</div><div class="ds-s mono" data-i18n-skip>ORBIT DOSSIER // FORM-6E</div></div>
+              </header>
+              <div class="ds-body">
+                <div class="ds-form">
+                  <div class="cells">
+                    <div class="cell wide"><label for="simulation-start-utc">仿真起始 UTC <i>EPOCH</i></label><input id="simulation-start-utc" type="datetime-local" /></div>
+                    <div class="cells-sep" aria-hidden="true"></div>
+                  </div>
+                  <form id="orbit-form" class="orbit-form">
+                    <div class="cells">
+                      <div class="cell wide"><div class="cell-h"><label for="orbit-name">轨道名称 <i>DESIGNATION</i></label><span class="edit-tag" id="edit-banner" role="status" hidden><i aria-hidden="true"></i>编辑中 · <b id="edit-name"></b><button type="button" id="edit-cancel" title="取消编辑" aria-label="取消编辑"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></span></div><div class="in"><input id="orbit-name" name="name" type="text" maxlength="32" placeholder="-" autocomplete="off" spellcheck="false" /></div></div>
+                      <div class="cell" data-element="a"><span class="glyph" aria-hidden="true">a</span><label for="f-a">半长轴 <i>SMA</i></label><div class="in"><input id="f-a" name="semiMajorAxisKm" type="number" step="any" min="6379" placeholder="-" required /><span class="u">km</span></div></div>
+                      <div class="cell" data-element="e"><span class="glyph" aria-hidden="true">e</span><label for="f-e">偏心率 <i>ECC</i></label><div class="in"><input id="f-e" name="eccentricity" type="number" step="any" min="0" max="0.999" placeholder="-" required /><span class="u">—</span></div></div>
+                      <div class="cell" data-element="i"><span class="glyph" aria-hidden="true">i</span><label for="f-i">轨道倾角 <i>INC</i></label><div class="in"><input id="f-i" name="inclinationDeg" type="number" step="any" placeholder="-" required /><span class="u">deg</span></div></div>
+                      <div class="cell" data-element="Ω"><span class="glyph" aria-hidden="true">Ω</span><label for="f-O">升交点赤经 <i>RAAN</i></label><div class="in"><input id="f-O" name="raanDeg" type="number" step="any" placeholder="-" required /><span class="u">deg</span></div></div>
+                      <div class="cell" data-element="ω"><span class="glyph" aria-hidden="true">ω</span><label for="f-w">近地点幅角 <i>AOP</i></label><div class="in"><input id="f-w" name="argPeriapsisDeg" type="number" step="any" placeholder="-" required /><span class="u">deg</span></div></div>
+                      <div class="cell" data-element="ν"><span class="glyph" aria-hidden="true">ν</span><label for="f-nu">真近点角 <i>TA</i></label><div class="in"><input id="f-nu" name="trueAnomalyDeg" type="number" step="any" placeholder="-" required /><span class="u">deg</span></div></div>
+                    </div>
+                    <div class="coll">
+                      <button type="button" class="coll-h" id="color-toggle" aria-expanded="false" aria-controls="color-flyout" aria-haspopup="dialog"><span id="color-preview" class="sw color-preview" aria-hidden="true"></span>轨道颜色 <i>COLOR</i><span class="hex" id="color-hex-label" data-i18n-skip></span><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6l3.5 3.5L11.5 6"/></svg></button>
+                    </div>
+                    <div id="form-errors" class="form-errors form-err" role="alert"></div>
+                    <div class="actions form-actions"><button id="submit-button" class="btn pri sh primary-action" type="submit">生成轨迹</button><button id="clear-form" class="btn clr secondary-action" type="button">清空</button></div>
+                  </form>
+                </div>
+                <div class="roster-h"><span>轨道名册</span><i data-i18n-skip>ROSTER</i><b class="roll js-rcount" id="orbit-list-count"></b><span class="rs-hint mono">点击切换选择</span></div>
+                <div class="rlist"><div id="orbit-list" class="roster orbit-list js-orbit-list" role="list" aria-label="轨道名册"></div></div>
+                <div class="roster-f"><div class="grp js-grp"></div><span class="rs-meta mono js-rmeta" data-i18n-skip></span></div>
+              </div>
+            </aside>
+          </section>
+
+          <!-- ========== VIEW 2 · GROUND TRACK ========== -->
+          <section class="view track" data-view="groundTrack" aria-label="星下点">
+            <div class="gt-left">
+              <div id="ground-track-panel" class="mapwin ground-track-panel" aria-label="星下点地图">
+                <header class="mw-h">
+                  <span class="tabcode" data-i18n-skip>B-02</span><span class="mw-t" data-scr>星下点轨迹</span>
+                  <span class="mw-s mono" data-i18n-skip>GROUND TRACK · EQUIRECT · LAND NE-10M</span>
+                  <span class="mw-hint mono">SHIFT / 右键拖拽 框选 · 拖拽 平移 · 滚轮 缩放</span>
+                  <div class="mw-ctl ground-track-toolbar" aria-label="星下点地图工具">
+                    <button id="ground-track-reset-view" class="ib" type="button" title="视角重置" aria-label="地图视角重置"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 9.5A5 5 0 1 0 4.6 4.4M3.5 2v3h3"/></svg></button>
+                    <button id="ground-track-screenshot" class="ib" type="button" title="导出当前场景与地图截图" aria-label="导出场景与地图截图"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h3l1.2-1.8h3.6L11 5h3v8H2z"/><circle cx="8" cy="9" r="2.3"/></svg></button>
+                    <button id="ground-track-minimize" class="ib" type="button" title="最小化（后台继续记录）" aria-label="最小化星下点模块" aria-pressed="false"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12.5h10"/></svg></button>
+                    <button id="ground-track-mode-toggle" class="ib" type="button" title="窗口 / 全屏" aria-label="切换窗口或全屏" aria-pressed="false"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M2.5 10v3.5H6M10 13.5h3.5V10"/></svg></button>
+                    <button id="ground-track-close" class="ib" type="button" title="关闭（清除地图历史）" aria-label="关闭星下点模块"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+                  </div>
+                </header>
+                <div class="gt-bar" aria-label="星下点地图设置">
+                  <div class="grp2"><span class="mk" data-i18n-skip>TRACKS</span><span class="tabcode" id="ground-track-count" data-i18n-skip>0</span><div id="ground-track-filter-list" class="grp2 ground-track-filter-list" aria-label="星下点轨迹选择"></div></div>
+                  <span class="vr" aria-hidden="true"></span>
+                  <div class="grp2"><span class="mk" data-i18n-skip>WINDOW</span>
+                    <label class="gt-field sr-select"><span class="sr">轨迹显示逻辑</span><select id="ground-track-window-mode" class="fld"><option value="revs" selected>按圈数</option><option value="time">按时间</option></select></label><div class="seg" data-seg-for="ground-track-window-mode" role="group" aria-label="轨迹显示逻辑"></div>
+                    <label class="gt-field"><span class="sr">保留圈数</span><input id="ground-track-past-revs" class="fld" type="number" min="0" step="1" value="2" /><span class="unit" data-i18n-skip>REV</span></label>
+                    <label class="gt-field"><span class="sr">保留时间</span><input id="ground-track-retention-time" class="fld" type="number" min="0" step="any" value="60" /></label>
+                    <label class="gt-field"><span class="sr">时间单位</span><select id="ground-track-retention-unit" class="fld"><option value="s">s</option><option value="min" selected>min</option><option value="hr">hr</option><option value="day">day</option></select></label>
+                  </div>
+                  <span class="vr" aria-hidden="true"></span>
+                  <div class="grp2"><span class="mk" data-i18n-skip>HIGHLIGHT</span>
+                    <label class="tchip plain" title="经线突出显示"><input id="ground-track-highlight-longitude" type="checkbox" /><i></i>经线</label>
+                    <label class="tchip plain" title="纬线突出显示"><input id="ground-track-highlight-latitude" type="checkbox" /><i></i>纬线</label>
+                    <label class="tchip plain" title="赤道线突出显示"><input id="ground-track-highlight-equator" type="checkbox" checked /><i></i>赤道线</label>
+                    <label class="tchip plain" title="鼠标经纬辅助线"><input id="ground-track-cursor-guides" type="checkbox" checked /><i></i>辅助线</label>
+                  </div>
+                </div>
+                <div class="mw-body ground-track-map-shell">
+                  <div class="wm" aria-hidden="true" data-i18n-skip>TRACK</div>
+                  <canvas id="ground-track-canvas" role="img" aria-label="星下点等经纬度地图"></canvas>
+                  <div id="ground-track-map-tooltip" class="ground-track-map-tooltip" hidden></div>
+                  <div id="ground-track-selection-summary" class="ground-track-selection-summary" hidden></div>
+                  <div class="map-read mono" id="ground-track-readout" data-i18n-skip>LON — · LAT —</div>
+                </div>
+              </div>
+              <div class="map-closed" id="ground-track-closed" hidden><span class="mono" data-i18n-skip>WINDOW CLOSED // GT-01</span><span>星下点窗口已关闭，后台已停止记录地图历史。</span><button class="btn pri" id="ground-track-reopen" type="button">重新打开</button></div>
+              <section class="cmod" id="ground-track-stats-panel" aria-label="区域统计">
+                <header class="cmod-hd"><div class="cmod-tab"><span class="cmod-code" data-i18n-skip>MOD.06</span><span class="cmod-title">区域统计</span><span class="cmod-en" data-i18n-skip>REGION STATS</span></div><div class="cmod-rule"></div><i class="cmod-hz" aria-hidden="true"></i></header>
+                <div class="cmod-bd ground-track-stats" id="ground-track-stats"></div>
+                <div class="cmod-wm" aria-hidden="true" data-i18n-skip>06</div><i class="rv a"></i><i class="rv b"></i><i class="rv c"></i><i class="rv d"></i>
+              </section>
+            </div>
+            <div class="gt-right">
+              <section class="mini" aria-label="轨道视窗">
+                <header class="mw-h"><span class="tabcode" data-i18n-skip>B-01</span><span class="mw-t" data-scr>轨道视窗</span><span class="mw-s mono" data-i18n-skip>3D VIEWPORT</span></header>
+                <div class="mini-b"><div class="wm" aria-hidden="true" data-i18n-skip>3D</div><div class="canvas-slot" id="track-canvas-slot"><canvas id="mini-canvas" role="img" aria-label="轨道预览：拖动旋转，滚轮缩放"></canvas></div></div>
+              </section>
+              <section class="gt-roster slab" aria-label="轨道名册">
+                <div class="roster-h"><span>轨道名册</span><i data-i18n-skip>ROSTER</i><b class="roll js-rcount"></b><span class="rs-hint mono">点击切换选择</span></div>
+                <div class="rbody rlist"><div id="orbit-list-track" class="roster orbit-list js-orbit-list" role="list" aria-label="轨道名册"></div></div>
+                <div class="roster-f"><div class="grp js-grp"></div><span class="rs-meta mono js-rmeta" data-i18n-skip></span></div>
+              </section>
+            </div>
+          </section>
+
+          <!-- ========== VIEW 3 · COMPUTE QUEUE ========== -->
+          <section class="view ops" data-view="console" id="console-panel" aria-label="计算任务">
+            <div class="wm" aria-hidden="true" data-i18n-skip>QUEUE</div>
+            <div class="ops-top">
+              <div class="stat bk" id="stat-connection">
+                <span class="mk">CONNECTION · 连接状态</span>
+                <div class="cn"><i></i><span id="ops-link-state">OFFLINE</span></div>
+                <div class="sub" id="backend-detail">正在连接本地计算服务…</div>
+                <div class="row"><button id="backend-retry" class="btn" type="button">重试连接</button></div>
+              </div>
+              <div class="stat bk">
+                <span class="mk">WORKER THREADS · 计算线程</span>
+                <div class="row" style="justify-content:space-between"><span class="big roll" id="backend-worker-count">—</span><span class="sub" data-i18n-skip>worker_threads · NODE_01</span></div>
+                <div class="slots" id="worker-slots" aria-label="计算线程占用"></div>
+              </div>
+              <div class="stat bk">
+                <span class="mk">QUEUE · 队列</span>
+                <div class="counters">
+                  <div><span class="mk">排队</span><b class="roll" id="backend-queue-count">—</b></div>
+                  <div><span class="mk" data-en="Running">运行</span><b class="roll" id="queue-running">—</b></div>
+                  <div><span class="mk">完成</span><b class="roll" id="queue-completed">—</b></div>
+                  <div class="fail"><span class="mk">失败</span><b class="roll" id="queue-failed">—</b></div>
+                </div>
+                <div id="backend-jobs" class="backend-jobs" aria-live="polite"><p class="queue-empty">提交轨道后，计算任务将在这里显示。</p></div>
+              </div>
+              <div class="stat bk">
+                <span class="mk">CURRENT JOB · 当前任务</span>
+                <div class="cur-t"><span id="backend-job-label">等待计算任务</span><b id="backend-job-percent">—</b></div>
+                <progress id="backend-job-progress" class="segbar" max="100" value="0" aria-label="后台计算进度"></progress>
+                <div class="row" style="justify-content:space-between"><span class="sub" id="backend-job-sub">—</span><button id="backend-cancel" class="btn dng" type="button" disabled>取消当前任务</button></div>
               </div>
             </div>
-          </details>
-          <div id="form-errors" class="form-errors" role="alert"></div>
-          <div class="form-actions">
-            <button id="submit-button" class="primary-action" type="submit">生成轨迹</button>
-            <button id="clear-form" class="secondary-action" type="button">清空</button>
-          </div>
-        </form>
+            <details id="task-table" class="panel task-table" open>
+              <summary class="panel-h"><span class="tabcode" data-i18n-skip>C-03</span><span class="t" data-scr>任务账本</span><span class="mono" data-i18n-skip>JOB LEDGER · prepare / frame / calibration / groundtrack / ephemeris</span><span class="sp"></span></summary>
+              <div class="ledger-wrap task-table-scroll"><table class="ledger"><thead><tr><th scope="col" data-en="Job">任务</th><th scope="col">类型</th><th scope="col">状态</th><th scope="col">进度</th><th scope="col" class="n">耗时</th><th scope="col" class="n">结果大小</th><th scope="col"><span class="sr">操作</span></th></tr></thead><tbody id="task-table-body"><tr><td colspan="7" class="task-empty">提交轨道或标定任务后，在这里查看计算状态。</td></tr></tbody></table></div>
+            </details>
+            <section class="console slab" aria-label="控制台">
+              <div class="panel-h"><span class="t">控制台</span><span class="mono" data-i18n-skip>COMPUTE CLIENT LOG</span><span class="sp"></span></div>
+              <div id="backend-log" class="backend-log con-body" role="log" aria-live="polite">等待计算服务日志…</div>
+            </section>
+          </section>
 
-        <section class="panel">
-          <div class="panel-title">
-            <h3>轨道列表</h3>
-            <span id="orbit-list-count">0 条</span>
-          </div>
-          <div id="orbit-list" class="orbit-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-title">
-            <h3>计算输出</h3>
-            <span id="selected-orbit-name">未选择</span>
-          </div>
-          <dl id="metrics" class="metrics">
-            <div><dt>周期</dt><dd>--</dd></div>
-            <div><dt>近地点高度</dt><dd class="metrics-value"><span>--</span><span class="metrics-unit">km</span></dd></div>
-            <div><dt>远地点高度</dt><dd class="metrics-value"><span>--</span><span class="metrics-unit">km</span></dd></div>
-            <div><dt>速度范围</dt><dd>--</dd></div>
-            <div><dt>ECI 位置</dt><dd>--</dd></div>
-            <div><dt>ECI 速度</dt><dd>--</dd></div>
-          </dl>
-        </section>
-
-        <section class="panel utility-panel">
-          <div class="panel-title">
-            <h3>辅助设置</h3>
-            <span>场景显示</span>
-          </div>
-          <label class="toggle-row"><input id="toggle-axes" type="checkbox" checked /> 坐标轴</label>
-          <label class="toggle-row"><input id="toggle-graticule" type="checkbox" checked /> 经纬线</label>
-          <label class="toggle-row"><input id="toggle-ecliptic" type="checkbox" checked /> 黄道面</label>
-          <label class="toggle-row"><input id="toggle-radius" type="checkbox" checked /> 赤道面</label>
-          <label class="toggle-row"><input id="toggle-reference" type="checkbox" checked /> 完整轨道淡参考</label>
-        </section>
-
-        <section class="panel other-functions-panel">
-          <div class="panel-title">
-            <h3>其他功能</h3>
-            <span>轨道分析</span>
-          </div>
-          <div class="calibration-tool" aria-label="位置矢量/速度矢量标定">
-            <div class="calibration-tool-header">
-              <h4>位置矢量/速度矢量标定</h4>
-              <span class="calibration-frame-label">ECI</span>
-            </div>
-            <div id="calibration-target-editor" class="calibration-target-editor" aria-label="标定点输入"></div>
-            <div id="calibration-editor-error" class="calibration-editor-error" aria-live="polite"></div>
-            <div class="calibration-actions">
-              <button id="calibration-add-target" class="secondary-action" type="button">添加至标定列表</button>
-              <button id="calibration-cancel-edit" class="secondary-action" type="button" hidden>取消编辑</button>
-              <button id="calibration-submit-all" class="primary-action" type="button">标定全部</button>
-              <button id="calibration-clear-results" class="secondary-action" type="button">清除结果</button>
-            </div>
-            <div class="calibration-list-header">
-              <span>标定点列表</span>
-              <strong id="calibration-target-count">0 条</strong>
-            </div>
-            <div id="calibration-target-list" class="calibration-target-list" aria-label="标定点列表"></div>
-            <div id="calibration-results" class="calibration-results" aria-live="polite">添加 ECI 矢量后点击标定全部。</div>
-          </div>
-        </section>
-      </aside>
-
-      <aside id="assets-panel" class="side-module-panel assets-panel" data-module-panel="assets" aria-label="资产">
-        <div class="module-panel-header">
-          <div>
-            <p class="eyebrow">Assets</p>
-            <h2>资产</h2>
-          </div>
-          <div class="workbench-controls">
-            <button class="pin-button" type="button" aria-label="固定资产" data-module-pin="assets" aria-pressed="false">
-              <svg class="button-icon pin-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M7 17h10"></path><path d="M8 5h8"></path><path d="M9 5v5.4c0 .8-.5 1.5-1.2 1.8L6 13.1V17h12v-3.9l-1.8-.9c-.7-.3-1.2-1-1.2-1.8V5"></path></svg>
-            </button>
+          <div class="shutter" id="shutter" hidden aria-hidden="true">
+            <div class="sh-slab" id="shutter-slab"><div class="b" id="shutter-code" data-i18n-skip>SWITCHING MODULE</div><div class="a" id="shutter-label">—</div></div>
+            <div class="sh-band" id="shutter-band"></div>
           </div>
         </div>
-        <section class="panel">
-          <div class="panel-title">
-            <h3>轨道组</h3>
-            <span id="asset-dirty-state">未保存</span>
-          </div>
-          <label>
-            <span>轨道组名称</span>
-            <input id="asset-group-name" type="text" maxlength="40" placeholder="例如：晨昏轨道组" autocomplete="off" />
-          </label>
-          <div class="asset-actions">
-            <button id="asset-save-group" class="primary-action" type="button">保存当前轨道组</button>
-            <button id="asset-rename-group" class="secondary-action" type="button">重命名</button>
-          </div>
-          <div id="asset-group-list" class="asset-group-list"></div>
-        </section>
-        <section class="panel">
-          <div class="panel-title">
-            <h3>数据导入导出</h3>
-            <span>本地文件</span>
-          </div>
-          <div class="utility-actions">
-            <button id="export-json" type="button">导出 JSON</button>
-            <label class="file-button">
-              导入 JSON
-              <input id="import-json" type="file" accept="application/json" />
-            </label>
-            <label class="file-button">
-              导入 TXT
-              <input id="import-txt" type="file" accept=".txt,text/plain" />
-            </label>
-            <button id="screenshot-button" type="button">导出截图</button>
-            <button id="export-ground-track-png" type="button">导出星下点轨迹</button>
-          </div>
-        </section>
-      </aside>
 
-      <aside id="settings-panel" class="side-module-panel settings-panel" data-module-panel="settings" aria-label="设置">
-        <div class="module-panel-header">
-          <div>
-            <p class="eyebrow">Settings</p>
-            <h2>设置</h2>
+        <!-- ===== overlays: a blurred scrim behind unpinned drawers and modals (pinned ones keep the scene live) ===== -->
+        <div class="scrim" id="module-scrim" aria-hidden="true"></div>
+
+        <!-- ===== assets modal ===== -->
+        <section id="assets-panel" class="modal side-module-panel assets-panel" data-module-panel="assets" role="dialog" aria-label="资产">
+          <header class="mh"><span class="tabcode" data-i18n-skip>M-04</span><div><div class="t" data-scr>资产</div><div class="s" data-i18n-skip>ASSETS · ORBIT GROUPS / IMPORT / EXPORT</div></div>
+            <button class="ib pin-button" type="button" aria-label="固定资产" title="固定资产" data-module-pin="assets" aria-pressed="false"><svg class="ic pin-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6zM8 8.5V14"/></svg></button>
+            <button class="ib" type="button" data-module-close aria-label="关闭"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+          </header>
+          <div class="mb m2">
+            <section>
+              <div class="msec-h">轨道组 <i>ORBIT GROUPS</i><span class="sp"></span><span class="badge" id="asset-dirty-state">未保存</span></div>
+              <div class="save-row"><input id="asset-group-name" type="text" maxlength="40" placeholder="组名，例如：晨昏轨道组" aria-label="轨道组名称" autocomplete="off" /><button id="asset-save-group" class="btn pri" type="button">保存当前组</button><button id="asset-rename-group" class="btn" type="button">重命名</button></div>
+              <div id="asset-group-list" class="asset-group-list grp-list"></div>
+            </section>
+            <section>
+              <div class="msec-h">导入 <i>IMPORT</i></div>
+              <div class="tiles utility-actions">
+                <label class="tile sh file-button"><span class="c" data-i18n-skip>IN · JSON</span><b>导入 JSON</b><span>v1 / v2 快照或 orbits 数组</span><input id="import-json" type="file" accept="application/json" /></label>
+                <label class="tile sh file-button"><span class="c" data-i18n-skip>IN · TXT</span><b>导入 TXT</b><span>名称行 + 五或六个根数值</span><input id="import-txt" type="file" accept=".txt,text/plain" /></label>
+              </div>
+              <div class="msec-h">导出 <i>EXPORT</i></div>
+              <div class="tiles utility-actions">
+                <button id="export-json" class="tile sh" type="button"><span class="c" data-i18n-skip>OUT · JSON</span><b>导出 JSON</b><span>当前轨道组快照</span></button>
+                <button id="ground-track-csv" class="tile sh" type="button"><span class="c" data-i18n-skip>OUT · CSV</span><b>导出轨迹 CSV</b><span>星下点采样点</span></button>
+                <button id="screenshot-button" class="tile sh" type="button"><span class="c" data-i18n-skip>OUT · PNG</span><b>导出截图</b><span>当前三维场景（含地图）</span></button>
+                <button id="export-ground-track-png" class="tile sh" type="button"><span class="c" data-i18n-skip>OUT · PNG</span><b>导出星下点轨迹</b><span>1920 × 1080 地图</span></button>
+              </div>
+            </section>
           </div>
-          <div class="workbench-controls">
-            <button class="pin-button" type="button" aria-label="固定设置" data-module-pin="settings" aria-pressed="false">
-              <svg class="button-icon pin-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"></path><path d="M7 17h10"></path><path d="M8 5h8"></path><path d="M9 5v5.4c0 .8-.5 1.5-1.2 1.8L6 13.1V17h12v-3.9l-1.8-.9c-.7-.3-1.2-1-1.2-1.8V5"></path></svg>
-            </button>
+        </section>
+
+        <!-- ===== drawers (calibration / settings): pin to keep open while working ===== -->
+
+        <aside id="calibration-panel" class="drawer slab side-module-panel" data-module-panel="calibration" aria-label="矢量标定">
+          <div class="band"></div>
+          <header class="dw-head"><span class="tabcode" data-i18n-skip>M-05</span><div><div class="t" data-scr>矢量标定</div><div class="s" data-i18n-skip>VECTOR CALIBRATION · ECI</div></div>
+            <button class="ib pin-button" type="button" aria-label="固定标定" title="固定标定" data-module-pin="calibration" aria-pressed="false"><svg class="ic pin-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6zM8 8.5V14"/></svg></button>
+            <button class="ib" type="button" data-module-close aria-label="关闭"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+          </header>
+          <div class="dw-body other-functions-panel">
+            <div class="calibration-tool" aria-label="位置矢量/速度矢量标定">
+              <div class="sec-h calibration-tool-header"><h4>位置矢量/速度矢量标定</h4><span class="calibration-frame-label">ECI</span></div>
+              <div id="calibration-target-editor" class="calibration-target-editor" aria-label="标定点输入"></div>
+              <div id="calibration-editor-error" class="calibration-editor-error" aria-live="polite"></div>
+              <div class="calibration-actions">
+                <button id="calibration-add-target" class="btn pri" type="button">添加至标定列表</button>
+                <button id="calibration-cancel-edit" class="btn" type="button" hidden>取消编辑</button>
+              </div>
+              <div class="sec-h calibration-list-header"><span>标定点列表</span><i>TARGETS</i><strong id="calibration-target-count" class="tabcode">0 条</strong></div>
+              <div id="calibration-target-list" class="calibration-target-list" aria-label="标定点列表"></div>
+              <div class="calibration-actions">
+                <button id="calibration-submit-all" class="btn pri sh" type="button">标定全部</button>
+                <button id="calibration-clear-results" class="btn" type="button">清除结果</button>
+              </div>
+              <div id="calibration-results" class="calibration-results" aria-live="polite">添加 ECI 矢量后点击标定全部。</div>
+            </div>
+          </div>
+        </aside>
+
+        <aside id="settings-panel" class="drawer slab side-module-panel settings-panel" data-module-panel="settings" aria-label="设置">
+          <div class="band"></div>
+          <header class="dw-head"><span class="tabcode" data-i18n-skip>M-06</span><div><div class="t" data-scr>设置</div><div class="s" data-i18n-skip>SETTINGS · RUNTIME PROFILE</div></div>
+            <button class="ib pin-button" type="button" aria-label="固定设置" title="固定设置" data-module-pin="settings" aria-pressed="false"><svg class="ic pin-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6zM8 8.5V14"/></svg></button>
+            <button class="ib" type="button" data-module-close aria-label="关闭"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+          </header>
+          <div class="dw-body">
+            <section class="sec performance-panel">
+              <div class="sec-h">性能预设 <i>PERFORMANCE</i></div>
+              <select id="ground-track-performance-mode" class="sr-select" tabindex="-1" aria-hidden="true"><option value="power-save">节能</option><option value="balanced">均衡</option><option value="high" selected>高性能</option><option value="custom">自定义</option></select>
+              <div class="seg" data-seg-for="ground-track-performance-mode" role="group" aria-label="性能预设"></div>
+              <p class="hint" id="performance-hint"></p>
+            </section>
+            <section class="sec">
+              <div class="sec-h">最高显存预算 <i>MEMORY BUDGET</i><span class="tabcode" id="custom-memory-value" data-i18n-skip>8 GB</span></div>
+              <input id="ground-track-custom-memory" class="range" type="range" min="1" max="24" step="1" value="8" aria-label="最高显存预算 GB" />
+              <div class="memgrid" id="custom-memory-grid" aria-hidden="true"></div>
+            </section>
+            <section class="sec">
+              <div class="sec-h">仿真帧率 <i>FRAME RATE</i><span class="tabcode" id="frame-rate-value" data-i18n-skip>60 FPS</span></div>
+              <select id="frame-rate-limit" class="sr-select" tabindex="-1" aria-hidden="true"><option value="30">30</option><option value="60" selected>60</option><option value="120">120</option><option value="0">不限</option></select>
+              <div class="seg" data-seg-for="frame-rate-limit" role="group" aria-label="仿真帧率"></div>
+              <p class="hint">三维场景重绘与后台取帧的目标帧率；「不限」跟随显示器刷新率。轨道很多时后台取帧会自动放缓。</p>
+            </section>
+            <section class="sec">
+              <div class="sec-h">导出文件名前缀 <i>EXPORT PREFIX</i></div>
+              <input id="export-name-prefix" class="fld" type="text" maxlength="40" value="ground-track" aria-label="导出文件名前缀" autocomplete="off" />
+            </section>
+            <section class="danger settings-danger-panel">
+              <div class="sec-h">危险操作 <i>DANGER ZONE</i></div>
+              <p>清除当前场景将移除全部轨道、地图历史与标定结果。未保存的轨道组请先在资产中保存。</p>
+              <button id="clear-all" class="btn dng" type="button">清除当前场景</button>
+            </section>
+            <section class="sec">
+              <div class="sec-h">会话 <i>SESSION</i></div>
+              <div><button id="exit-page" class="btn" type="button">退出</button></div>
+              <p class="hint mono" data-i18n-skip>SYS.VER // 0.2.0 · FIREFLY · NODE.JS WORKER_THREADS</p>
+            </section>
+          </div>
+        </aside>
+      </div>
+
+      <!-- ===== bottom bar · playback + telemetry, spans the full window ===== -->
+      <footer class="dock bottom-console" aria-label="仿真控制">
+        <div class="db db-play">
+          <button id="play-toggle" class="btn play run-button" type="button" aria-label="运行"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg><span>运行</span></button>
+          <button id="pause-button" class="btn play is-on icon-control-button" type="button" aria-label="暂停" title="暂停"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12"></path><path d="M15 6v12"></path></svg><span>暂停</span></button>
+          <button id="reset-time" class="btn icon-control-button" type="button" aria-label="重置" title="重置时间 (R)"><svg class="button-icon reset-icon" viewBox="0 0 24 24" aria-hidden="true"><path class="reset-icon-arc" d="M6.1 17.3A8.2 8.2 0 1 0 7.2 5.6"></path><path class="reset-icon-head" d="M4.4 2.8 2.3 13.7 12.5 10.8z"></path></svg><span>重置</span></button>
+        </div>
+        <div class="db db-speed"><span class="mk" data-i18n-skip>SPEED</span>
+          <label class="speed-control"><span class="sr">速度倍率</span><select id="speed-factor" class="fld">
+            <option value="1">1x</option>
+            <option value="60" selected>60x (1min/s)</option>
+            <option value="600">600x</option>
+            <option value="3600">3600x (1hr/s)</option>
+            <option value="6000">6000x</option>
+            <option value="86400">86400X (1day/s)</option>
+          </select></label>
+        </div>
+        <div class="db db-lim">
+          <div class="tp-lim" id="simulation-run-control">
+            <button id="run-limit-toggle" class="btn run-limit-toggle" type="button" aria-label="限制仿真时长" aria-expanded="false" aria-controls="run-limit-menu">限时 <b class="mono" id="run-limit-value" data-i18n-skip>∞</b></button>
+            <div id="run-limit-menu" class="pop run-limit-menu" role="menu" hidden>
+              <label for="run-duration-limit">现实运行时长 / s</label>
+              <input id="run-duration-limit" type="number" min="0" step="1" value="0" inputmode="numeric" />
+              <small>0 表示不限时</small>
+            </div>
           </div>
         </div>
-        <section class="panel performance-panel">
-          <div class="panel-title">
-            <h3>性能选择</h3>
-            <span>采样预算</span>
-          </div>
-          <label>
-            <span>性能档位</span>
-            <select id="ground-track-performance-mode">
-              <option value="power-save">节能</option>
-              <option value="balanced">均衡</option>
-              <option value="high" selected>高性能</option>
-              <option value="custom">自定义</option>
-            </select>
-          </label>
-          <label>
-            <span>最高显存预算 / GB</span>
-            <input id="ground-track-custom-memory" type="number" min="1" max="24" step="0.5" value="8" />
-          </label>
-        </section>
-        <section class="panel">
-          <div class="panel-title">
-            <h3>导出命名</h3>
-            <span>文件名前缀</span>
-          </div>
-          <label>
-            <span>星下点轨迹 PNG 前缀</span>
-            <input id="export-name-prefix" type="text" maxlength="40" value="ground-track" autocomplete="off" />
-          </label>
-        </section>
-        <section class="panel settings-danger-panel">
-          <button id="clear-all" class="secondary-action danger-action" type="button">清除当前场景</button>
-          <button id="exit-page" class="secondary-action" type="button">退出</button>
-        </section>
-      </aside>
-    </main>
+        <div class="db db-scrub">
+          <div class="tp-tape"><input id="timeline-scrubber" type="range" min="0" max="6000" value="0" step="1" aria-label="仿真时间轴" /></div>
+          <output id="timeline-range-label" class="mono" data-i18n-skip>0 — 6000 s</output>
+        </div>
+        <div class="db db-t"><div class="simulation-time-panel tp-read time-readout" tabindex="0" title="双击切换时间单位 s / min / hr / day" data-i18n-skip><span class="k">T+</span><strong id="time-readout" class="v">00000.0</strong><span class="u" id="time-readout-unit">s</span></div></div>
+        <div class="db utc-db"><div class="utc"><span class="mk" data-i18n-skip>UTC</span><b id="clock-utc" data-i18n-skip>—</b></div></div>
+        <div class="db telem-db"><div class="telem"><span title="计算余量：100% 减去后台计算负载（取帧耗时占帧间隔的比例与计算线程占用中的较大值）">PWR</span><b id="telem-power" data-i18n-skip>—</b><span title="计算热度：由计算负载折算的指示值（36–47），随负载缓慢升降，非硬件温度">TEMP</span><b id="telem-temp" data-i18n-skip>—</b><span title="渲染帧时间">FRAME</span><b id="telem-frame" data-i18n-skip>—</b></div></div>
+      </footer>
+    </div>
+
+    <!-- ===== colour flyout · opens left of the dossier, over the 3D scene ===== -->
+    <div class="cfly" id="color-flyout" role="dialog" aria-label="轨道颜色" hidden>
+      <div class="cfly-h"><span class="sw" id="color-flyout-swatch"></span><b>轨道颜色</b><i data-i18n-skip>COLOR</i><span class="hex mono" id="color-flyout-hex" data-i18n-skip></span><button type="button" class="ib" id="color-flyout-close" aria-label="关闭"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></div>
+      <div class="color-grid">
+        <label>色盘<input name="colorPicker" type="color" value="#2fb5a2" aria-label="轨道颜色色盘" /></label>
+        <label>R<input class="fld" name="colorR" type="number" min="0" max="255" step="1" value="47" /></label>
+        <label>G<input class="fld" name="colorG" type="number" min="0" max="255" step="1" value="181" /></label>
+        <label>B<input class="fld" name="colorB" type="number" min="0" max="255" step="1" value="162" /></label>
+        <label>Hex<input class="fld" name="colorHex" type="text" value="#2fb5a2" maxlength="7" autocomplete="off" /></label>
+      </div>
+      <div class="swatches" id="color-swatches"></div>
+    </div>
+
+    <!-- ===== help modal ===== -->
+    <section id="info-modal" class="modal info-modal info-dialog" role="dialog" aria-modal="true" aria-label="说明">
+        <header class="mh"><span class="tabcode" data-i18n-skip>M-07</span><div><div class="t" data-scr>说明</div><div class="s" data-i18n-skip>FIELD MANUAL · v0.2.0</div></div><button id="info-close" class="ib" type="button" aria-label="关闭说明"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></header>
+        <div class="mb help-grid help-content">
+          <section>
+            <div class="msec-h">从参数到轨迹 <i>WORKFLOW</i></div>
+            <ol class="help-steps"><li><strong>建立轨道</strong><span>在工作台填写轨道六根数并生成轨迹；也可在资产中导入 JSON 或 TXT。</span></li><li><strong>运行仿真</strong><span>选择速度倍率并运行。拖动旋转场景，滚轮缩放；双击仿真时刻可切换时间单位。</span></li><li><strong>分析与导出</strong><span>通过星下点视图查看地面轨迹和区域统计；标定抽屉提供位置及速度矢量标定。</span></li></ol>
+            <p class="help-note">轨道计算由本地后台执行。计算状态、任务账本与日志在「任务」视图查看。</p>
+            <p class="help-note">底栏 PWR 为计算余量，TEMP 为由计算负载折算的热度指示（非硬件读数），FRAME 为渲染帧时间。</p>
+          </section>
+          <section>
+            <div class="msec-h">快捷键 <i>KEYS</i></div>
+            <dl>
+              <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt><dd>切换 工作台 / 星下点 / 任务</dd>
+              <dt><kbd>Space</kbd></dt><dd>运行 / 暂停</dd>
+              <dt><kbd>R</kbd></dt><dd>重置时间至 T+0</dd>
+              <dt><kbd>F</kbd> <kbd>T</kbd> <kbd>0</kbd></dt><dd>正视图 / 俯视图 / 视角重置</dd>
+              <dt><kbd>Shift</kbd>+拖拽</dt><dd>星下点框选区域统计</dd>
+              <dt><kbd>Esc</kbd></dt><dd>关闭菜单 / 抽屉 / 弹窗</dd>
+              <dt>双击 T+</dt><dd>循环切换 s / min / hr / day</dd>
+            </dl>
+            <div class="msec-h" style="margin-top:14px">轨道分类 <i>CLASSES</i></div>
+            <dl class="help-classes">
+              <dt data-i18n-skip>GEO</dt><dd>a = 42164 ± 200 km，e &lt; 0.01，i &lt; 5°</dd>
+              <dt data-i18n-skip>IGSO</dt><dd>同一 a 区间，i ≥ 5°</dd>
+              <dt data-i18n-skip>Molniya</dt><dd>e ≥ 0.6，i = 63.4 ± 3°，T = 11.5–12.5 h</dd>
+              <dt data-i18n-skip>HEO</dt><dd>其余 e ≥ 0.25</dd>
+              <dt data-i18n-skip>LEO</dt><dd>远地点高度 &lt; 2000 km</dd>
+              <dt data-i18n-skip>MEO</dt><dd>其余轨道</dd>
+            </dl>
+          </section>
+        </div>
+    </section>
+
     <script type="module" src="./js/app.mjs"></script>
   </body>
 </html>

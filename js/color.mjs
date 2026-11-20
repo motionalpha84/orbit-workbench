@@ -1,9 +1,12 @@
+// V2.2 Firefly palette: mid-tone colours that stay legible on the light stage and the map.
 export const DEFAULT_ORBIT_COLORS = [
-  '#616c8c',
-  '#568c87',
-  '#7cb388',
-  '#f2de79',
-  '#d95f18',
+  '#2fb5a2',
+  '#f07a3c',
+  '#6a7fd8',
+  '#94bc3a',
+  '#d9a520',
+  '#d2608a',
+  '#3a92c8',
 ];
 
 function clampChannel(value) {
@@ -38,4 +41,17 @@ export function hexToRgb(value) {
 
 export function nextOrbitColor(index) {
   return DEFAULT_ORBIT_COLORS[Math.abs(Number(index) || 0) % DEFAULT_ORBIT_COLORS.length];
+}
+
+// Light-theme display colour: very pale orbit colours (luminance > 0.6, e.g. v2.1's #e2e8f0)
+// are pulled toward slate so they stay visible on the pale stage and map. Stored colours,
+// lists and exports keep their original value; only drawing uses this.
+export function displayColorOnLight(value) {
+  const hex = normalizeHexColor(value);
+  const { r, g, b } = hexToRgb(hex);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (luminance <= 0.6) return hex;
+  const mix = Math.min(0.6, (luminance - 0.6) * 1.5 + 0.3);
+  const slate = [0x22, 0x32, 0x3a];
+  return rgbToHex(...[r, g, b].map((channel, index) => channel + (slate[index] - channel) * mix));
 }

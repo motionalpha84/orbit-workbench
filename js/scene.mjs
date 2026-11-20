@@ -1,5 +1,7 @@
 import * as THREE from '../vendor/three.module.js';
-import { EARTH_RADIUS_KM, normalizePerturbationModel, propagateOrbit, sampleOrbit } from './orbit.mjs';
+import { EARTH_RADIUS_KM, normalizePerturbationModel } from './orbit.mjs';
+import { OrbitBatchRenderer, ORBIT_BATCH_THRESHOLD } from './orbit-batch.mjs';
+import { displayColorOnLight } from './color.mjs';
 
 const EARTH_SCENE_RADIUS = 1;
 const KM_TO_SCENE = EARTH_SCENE_RADIUS / EARTH_RADIUS_KM;
@@ -14,6 +16,23 @@ const TWO_PI = Math.PI * 2;
 
 export const EARTH_SIDEREAL_DAY_SECONDS = 86164.0905;
 
+// 'dark' is the v2.1 deep-space look. 'light' is the V2.2 Firefly stage: the canvas clears
+// transparent so the frosted stage shows through, glows use normal blending (additive light
+// vanishes on a pale field), and reference lines, planes and axes are re-tinted for contrast.
+const THEMES = {
+  dark: {
+    clear: 0x0a0d14, clearAlpha: 1, additive: true, glow: 0x38f8b8, glowAlpha: 0.2,
+    axes: [0xff6b6b, 0x7ed957, 0x6ba8ff], ecliptic: [0xd8c68d, 0.026], equator: [0x7dcacb, 0.024],
+    equatorRing: [0x8ddfff, 0.16], stars: { size: 0.16, opacity: 0.66, tint: null }, focusOpacity: [0.9, 0.38, 0.68],
+  },
+  light: {
+    clear: 0xe9f0ef, clearAlpha: 0, additive: false, glow: 0x3fb5a3, glowAlpha: 0.42,
+    axes: [0xd4553a, 0x3e9a4a, 0x3a6fd0], ecliptic: [0xc9a040, 0.1], equator: [0x2f9aa0, 0.08],
+    equatorRing: [0x2f8fa0, 0.42], stars: { size: 0.09, opacity: 0.3, tint: 0x4a5f64 }, focusOpacity: [0.95, 0.42, 0.8],
+  },
+};
+
+
 function colorFromHex(hex) {
   return new THREE.Color(hex);
 }
@@ -27,6 +46,7 @@ function vectorToScene(positionKm) {
 }
 
 function isFiniteVector(vector = {}) {
+  if (!vector || typeof vector !== 'object') return false;
   return Number.isFinite(Number(vector.x))
     && Number.isFinite(Number(vector.y))
     && Number.isFinite(Number(vector.z));
@@ -103,6 +123,42 @@ function createLineFromPoints(points, color, opacity = 0.14) {
   return new THREE.Line(geometry, material);
 }
 
+// Keep the reference planes in their physical orientation while fading their
+// fill before the mesh boundary. A constant alpha exposed a large hard disc.
+function createReferencePlaneMaterial(color, opacity) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      planeColor: { value: new THREE.Color(color) },
+      planeOpacity: { value: opacity },
+    },
+    transparent: true,
+    opacity,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    vertexShader: `
+      varying vec2 vPlaneUv;
+      void main() {
+        vPlaneUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 planeColor;
+      uniform float planeOpacity;
+      varying vec2 vPlaneUv;
+      void main() {
+        float radius = length(vPlaneUv * 2.0 - 1.0);
+        float fade = 1.0 - smoothstep(0.12, 0.98, radius);
+        float alpha = planeOpacity * fade * fade;
+        if (alpha < 0.00001) discard;
+        gl_FragColor = vec4(planeColor, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
 function createEarthGraticule() {
   const group = new THREE.Group();
   const radius = EARTH_SCENE_RADIUS * 1.006;
@@ -163,13 +219,13 @@ function createTailGeometry(count) {
   return geometry;
 }
 
-function createTailMaterial(color) {
+function createTailMaterial(color, additive = true) {
   const base = colorFromHex(color);
   const highlight = base.clone().lerp(new THREE.Color(0xffffff), 0.42);
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     uniforms: {
       color: { value: base },
       highlight: { value: highlight },
@@ -211,26 +267,36 @@ function createTailMaterial(color) {
   });
 }
 
-function createStarField() {
-  const count = 900;
+function createStarField(look = THEMES.dark.stars) {
+  const count = 1800;
   const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  let seed = 0x7a6f1;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const starColors = [new THREE.Color(0xc8dce9), new THREE.Color(0xe9eef4), new THREE.Color(0xe2c390)];
   for (let i = 0; i < count; i += 1) {
-    const radius = 34 + Math.random() * 46;
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
+    const radius = 34 + random() * 46;
+    const theta = random() * Math.PI * 2;
+    const phi = Math.acos(2 * random() - 1);
     positions.set([
       radius * Math.sin(phi) * Math.cos(theta),
       radius * Math.cos(phi),
       radius * Math.sin(phi) * Math.sin(theta),
     ], i * 3);
+    (look.tint === null ? starColors[i % 11 === 0 ? 2 : i % 2] : new THREE.Color(look.tint)).toArray(colors, i * 3);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
-    color: 0xd7fff6,
-    size: 0.035,
+    color: 0xffffff,
+    vertexColors: true,
+    size: look.size,
     transparent: true,
-    opacity: 0.38,
+    opacity: look.opacity,
     depthWrite: false,
   });
   return new THREE.Points(geometry, material);
@@ -457,23 +523,31 @@ class ArcballControls {
 }
 
 export class OrbitScene {
-  constructor(canvas) {
+  constructor(canvas, { theme = 'dark' } = {}) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+    this.themeName = THEMES[theme] ? theme : 'dark';
+    this.theme = THEMES[this.themeName];
+    const transparent = this.theme.clearAlpha < 1;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: transparent, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.setClearColor(0x071015, 1);
+    this.renderer.setClearColor(this.palette.clear, this.palette.clearAlpha);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.12;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x071015);
+    this.scene.background = transparent ? null : new THREE.Color(this.palette.clear);
 
-    this.camera = new THREE.PerspectiveCamera(44, 1, 0.01, 1000);
+    this.camera = new THREE.PerspectiveCamera(39, 1, 0.01, 1000);
     this.camera.position.copy(DEFAULT_CAMERA_POSITION);
 
     this.controls = new ArcballControls(this.camera, this.renderer.domElement);
     this.controls.rotateSpeed = 0.45;
 
     this.orbitGroups = new Map();
+    this.orbitBatch = null;
+    this.batchThreshold = ORBIT_BATCH_THRESHOLD;
+    this.computedRecords = new Map();
     this.showReference = true;
     this.elapsedSeconds = 0;
     this.frame = 'ECI';
@@ -494,7 +568,7 @@ export class OrbitScene {
     this.calibrationMarkerGroup = new THREE.Group();
     this.scene.add(this.root);
     this.root.add(this.calibrationMarkerGroup);
-    this.scene.add(createStarField());
+    this.scene.add(createStarField(this.palette.stars));
 
     this.createLighting();
     this.createEarth();
@@ -504,11 +578,11 @@ export class OrbitScene {
   }
 
   createLighting() {
-    this.scene.add(new THREE.AmbientLight(0x6c8798, 1.4));
-    const sun = new THREE.DirectionalLight(0xffffff, 2.5);
-    sun.position.set(3.8, 2.1, 4.2);
+    this.scene.add(new THREE.AmbientLight(0xa8bfd0, 1.35));
+    const sun = new THREE.DirectionalLight(0xf3f6f8, 2.15);
+    sun.position.set(-4, 3, 5);
     this.scene.add(sun);
-    const rim = new THREE.DirectionalLight(0x69d6ff, 0.9);
+    const rim = new THREE.DirectionalLight(0x70d3c0, 0.55);
     rim.position.set(-3.2, 1.1, -2.4);
     this.scene.add(rim);
   }
@@ -519,10 +593,10 @@ export class OrbitScene {
 
     const geometry = new THREE.SphereGeometry(EARTH_SCENE_RADIUS, 128, 96);
     const fallbackMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1f6fb1,
+      color: 0x506c82,
       roughness: 0.74,
       metalness: 0.02,
-      emissive: 0x082034,
+      emissive: 0x0b1819,
       emissiveIntensity: 0.2,
     });
     this.earth = new THREE.Mesh(geometry, fallbackMaterial);
@@ -536,28 +610,58 @@ export class OrbitScene {
         texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
         const material = new THREE.MeshStandardMaterial({
           map: texture,
-          roughness: 0.86,
+          color: 0xd2dde4,
+          roughness: 0.82,
           metalness: 0.01,
-          emissive: 0x06131a,
+          emissive: 0x091516,
           emissiveIntensity: 0.12,
         });
+        material.onBeforeCompile = (shader) => {
+          shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+            float grayEarth = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            diffuseColor.rgb = mix(vec3(grayEarth), diffuseColor.rgb, 0.52) * vec3(0.84, 0.93, 1.0);
+            diffuseColor.rgb = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(0.88));`);
+        };
         this.earth.material.dispose();
         this.earth.material = material;
       },
       undefined,
       () => {
-        this.earth.add(createCircleLine(1.003, 0x8ddfff, 0.18));
+        this.earth.add(createCircleLine(1.003, 0x8ddfc9, 0.18));
       },
     );
 
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(EARTH_SCENE_RADIUS * 1.035, 96, 64),
-      new THREE.MeshBasicMaterial({
-        color: 0x4bc8ff,
-        transparent: true,
-        opacity: 0.09,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
+      new THREE.ShaderMaterial({
+        uniforms: { glowColor: { value: new THREE.Color(this.palette.glow) }, glowAlpha: { value: this.palette.glowAlpha } },
+        vertexShader: `
+          varying vec3 vNormal;
+          varying vec3 vPosition;
+          void main() {
+            vec4 world = modelMatrix * vec4(position, 1.0);
+            vPosition = world.xyz;
+            vNormal = normalize(mat3(modelMatrix) * normal);
+            gl_Position = projectionMatrix * viewMatrix * world;
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 glowColor;
+          uniform float glowAlpha;
+          varying vec3 vNormal;
+          varying vec3 vPosition;
+          void main() {
+            vec3 direction = normalize(cameraPosition - vPosition);
+            float facing = abs(dot(normalize(vNormal), direction));
+            float fresnel = pow(1.0 - facing, 3.0);
+            float softEdge = smoothstep(0.0, 0.28, facing);
+            gl_FragColor = vec4(glowColor, fresnel * softEdge * glowAlpha);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }
+        `,
+        transparent: true, blending: this.palette.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+        depthWrite: false, side: THREE.BackSide,
       }),
     );
     this.earthBody.add(glow);
@@ -569,9 +673,9 @@ export class OrbitScene {
   createOverlays() {
     this.axesGroup = new THREE.Group();
     const axes = [
-      createAxis(new THREE.Vector3(1, 0, 0), 0xff6b6b, 'x'),
-      createAxis(new THREE.Vector3(0, 0, -1), 0x7ed957, 'y'),
-      createAxis(new THREE.Vector3(0, 1, 0), 0x6ba8ff, 'z'),
+      createAxis(new THREE.Vector3(1, 0, 0), this.palette.axes[0], 'x'),
+      createAxis(new THREE.Vector3(0, 0, -1), this.palette.axes[1], 'y'),
+      createAxis(new THREE.Vector3(0, 1, 0), this.palette.axes[2], 'z'),
     ];
     for (const axis of axes) {
       this.axisLabels.push(axis.userData.axisLabel);
@@ -583,13 +687,7 @@ export class OrbitScene {
     this.eclipticGroup = new THREE.Group();
     const eclipticMesh = new THREE.Mesh(
       new THREE.CircleGeometry(EARTH_SCENE_RADIUS * 3.4, 192),
-      new THREE.MeshBasicMaterial({
-        color: 0xf2de79,
-        transparent: true,
-        opacity: 0.045,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
+      createReferencePlaneMaterial(...this.palette.ecliptic),
     );
     eclipticMesh.rotation.x = Math.PI / 2 + THREE.MathUtils.degToRad(ECLIPTIC_OBLIQUITY_DEG);
     this.eclipticGroup.add(eclipticMesh);
@@ -598,17 +696,11 @@ export class OrbitScene {
     this.radiusGroup = new THREE.Group();
     const equatorMesh = new THREE.Mesh(
       new THREE.CircleGeometry(EARTH_SCENE_RADIUS * 1.45, 192),
-      new THREE.MeshBasicMaterial({
-        color: 0x8ddfff,
-        transparent: true,
-        opacity: 0.035,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
+      createReferencePlaneMaterial(...this.palette.equator),
     );
     equatorMesh.rotation.x = Math.PI / 2;
     this.radiusGroup.add(equatorMesh);
-    this.radiusGroup.add(createCircleLine(EARTH_SCENE_RADIUS * 1.45, 0x8ddfff, 0.16));
+    this.radiusGroup.add(createCircleLine(EARTH_SCENE_RADIUS * 1.45, ...this.palette.equatorRing));
     this.root.add(this.radiusGroup);
   }
 
@@ -628,13 +720,18 @@ export class OrbitScene {
         this.setVisibleAxisLabel(axisHit?.object.userData.axisLabel ?? null);
       }
 
-      const orbitHit = this.raycaster
-        .intersectObjects(this.orbitHoverTargets, true)
-        .find((item) => {
-          const orbitId = item.object.userData.orbitId;
-          return orbitId && this.orbitGroups.get(orbitId)?.root.visible;
-        });
-      const orbitId = orbitHit?.object.userData.orbitId ?? null;
+      let orbitId = null;
+      if (this.orbitBatch) {
+        orbitId = this.orbitBatch.pick(this.raycaster.ray, this.raycaster.params.Points.threshold)?.id ?? null;
+      } else {
+        const orbitHit = this.raycaster
+          .intersectObjects(this.orbitHoverTargets, true)
+          .find((item) => {
+            const id = item.object.userData.orbitId;
+            return item.object.visible && id && this.orbitGroups.get(id)?.root.visible;
+          });
+        orbitId = orbitHit?.object.userData.orbitId ?? null;
+      }
       if (orbitId === this.hoveredOrbitId) {
         if (orbitId && this.orbitHoverCallback) {
           const group = this.orbitGroups.get(orbitId);
@@ -671,9 +768,8 @@ export class OrbitScene {
     if (typeof radius === 'boolean') this.radiusGroup.visible = radius;
     if (typeof reference === 'boolean') {
       this.showReference = reference;
-      for (const group of this.orbitGroups.values()) {
-        group.reference.visible = reference;
-      }
+      if (this.orbitBatch) this.orbitBatch.parts.reference.object.visible = reference;
+      else for (const group of this.orbitGroups.values()) group.reference.visible = reference;
     }
   }
 
@@ -700,26 +796,23 @@ export class OrbitScene {
       MIN_REFERENCE_SAMPLES,
       Math.floor(Number(budget.max3dReferenceSamples) || MAX_REFERENCE_SAMPLES),
     );
-    if (nextMaxReferenceSamples === this.maxReferenceSamples) return;
     this.maxReferenceSamples = nextMaxReferenceSamples;
-    for (const group of this.orbitGroups.values()) {
-      group.referenceSignature = '';
-    }
-    this.syncOrbits(
-      Array.from(this.orbitGroups.values()).map((group) => group.orbitRecord),
-      this.perturbationModel,
-    );
   }
 
   applyOrbitFocus() {
+    if (this.orbitBatch) {
+      this.orbitBatch.setFocus(this.selectedOrbitIds);
+      return;
+    }
     const hasSelectedOrbit = Array.from(this.selectedOrbitIds).some((id) => this.orbitGroups.has(id));
     for (const group of this.orbitGroups.values()) {
       const isSelected = hasSelectedOrbit && this.selectedOrbitIds.has(group.orbitRecord.id);
       const isMuted = hasSelectedOrbit && !isSelected;
-      group.reference.material.opacity = isSelected ? 0.5 : isMuted ? 0.09 : 0.28;
-      group.tail.material.uniforms.focusOpacity.value = isSelected ? 1.25 : isMuted ? 0.32 : 1;
-      group.marker.material.opacity = isMuted ? 0.5 : 1;
-      group.marker.material.emissiveIntensity = isSelected ? 1.45 : isMuted ? 0.28 : 0.9;
+      const [selectedOpacity, mutedOpacity, idleOpacity] = this.palette.focusOpacity;
+      group.reference.material.opacity = isSelected ? selectedOpacity : isMuted ? mutedOpacity : idleOpacity;
+      group.tail.material.uniforms.focusOpacity.value = isSelected ? 1.35 : isMuted ? 0.65 : 1.1;
+      group.marker.material.opacity = isMuted ? 0.82 : 1;
+      group.marker.material.emissiveIntensity = isSelected ? 1.6 : isMuted ? 0.7 : 1.1;
       group.marker.scale.setScalar(isSelected ? 1.24 : isMuted ? 0.78 : 1);
     }
   }
@@ -740,12 +833,27 @@ export class OrbitScene {
   syncOrbits(orbits, perturbationModel = this.perturbationModel) {
     const model = normalizePerturbationModel(perturbationModel);
     this.perturbationModel = model;
+    if (orbits.length >= (this.batchThreshold ?? ORBIT_BATCH_THRESHOLD)) {
+      this.syncBatchedOrbits(orbits, model);
+      return;
+    }
+    if (this.orbitBatch) {
+      for (const orbitRecord of orbits) {
+        const previous = this.orbitGroups.get(orbitRecord.id);
+        if (previous?.referenceSignature !== orbitReferenceSignature(orbitRecord, model)) this.computedRecords.delete(orbitRecord.id);
+      }
+      this.root.remove(this.orbitBatch.root);
+      this.orbitBatch.dispose();
+      this.orbitBatch = null;
+      this.orbitGroups.clear();
+    }
     const activeIds = new Set(orbits.map((orbit) => orbit.id));
     for (const [id, group] of this.orbitGroups.entries()) {
       if (!activeIds.has(id)) {
         this.root.remove(group.root);
         disposeObject(group.root);
         this.orbitGroups.delete(id);
+        this.computedRecords.delete(id);
       }
     }
 
@@ -756,6 +864,15 @@ export class OrbitScene {
       const group = this.orbitGroups.get(orbitRecord.id);
       group.orbitRecord = orbitRecord;
       this.updateOrbitReference(group, orbitRecord, model);
+      if (group.color !== orbitRecord.color) {
+        group.color = orbitRecord.color;
+        const color = colorFromHex(this.displayColor(orbitRecord.color));
+        group.reference.material.color.copy(color);
+        group.tail.material.uniforms.color.value.copy(color);
+        group.tail.material.uniforms.highlight.value.copy(color).lerp(new THREE.Color(0xffffff), 0.42);
+        group.marker.material.color.copy(color);
+        group.marker.material.emissive.copy(color);
+      }
       group.root.visible = orbitRecord.visible;
       group.reference.visible = orbitRecord.visible && this.showReference;
     }
@@ -764,34 +881,80 @@ export class OrbitScene {
     this.applyOrbitFocus();
   }
 
+  syncBatchedOrbits(orbits, model) {
+    if (!this.orbitBatch) {
+      // Individual GPU objects are released when crossing the batch threshold.
+      // Latest authoritative frames remain available during both transitions.
+      const signatures = new Map([...this.orbitGroups].map(([id, group]) => [id, group.referenceSignature]));
+      for (const group of this.orbitGroups.values()) {
+        this.root.remove(group.root);
+        disposeObject(group.root);
+      }
+      this.orbitGroups.clear();
+      for (const orbitRecord of orbits) {
+        const signature = signatures.get(orbitRecord.id);
+        if (signature && signature !== orbitReferenceSignature(orbitRecord, model)) this.computedRecords.delete(orbitRecord.id);
+      }
+      this.orbitBatch = new OrbitBatchRenderer({ additive: this.palette.additive, displayColor: (hex) => this.displayColor(hex) });
+      this.root.add(this.orbitBatch.root);
+      this.orbitBatch.setViewport(this.canvas?.clientHeight || 800, this.renderer?.getPixelRatio() || 1);
+    }
+    const activeIds = new Set(orbits.map((record) => record.id));
+    for (const id of this.computedRecords.keys()) if (!activeIds.has(id)) this.computedRecords.delete(id);
+    const metadata = new Map();
+    for (const orbitRecord of orbits) {
+      const signature = orbitReferenceSignature(orbitRecord, model);
+      const previous = this.orbitGroups.get(orbitRecord.id);
+      if (previous?.referenceSignature && previous.referenceSignature !== signature) this.computedRecords.delete(orbitRecord.id);
+      metadata.set(orbitRecord.id, { orbitRecord, root: { visible: orbitRecord.visible !== false }, referenceSignature: signature });
+    }
+    this.orbitGroups = metadata;
+    this.orbitBatch.setRecords(orbits, this.selectedOrbitIds, this.showReference);
+    this.orbitBatch.updateFrame(this.computedRecords, this.elapsedSeconds);
+    this.orbitHoverTargets = [];
+  }
+
+  // Theme lookups fall back to the v2.1 dark look for scenes built without the constructor.
+  get palette() {
+    return this.theme ?? THEMES.dark;
+  }
+
+  // Pale orbit colours are darkened for drawing on the light stage (stored colours unchanged).
+  displayColor(hex) {
+    return this.themeName === 'light' ? displayColorOnLight(hex) : hex;
+  }
+
   createOrbitGroup(orbitRecord, perturbationModel = this.perturbationModel) {
     const root = new THREE.Group();
     const color = orbitRecord.color;
+    const shown = this.displayColor(color);
     root.userData.orbitId = orbitRecord.id;
 
-    const referenceMaterial = new THREE.PointsMaterial({
-      color: colorFromHex(color),
-      size: 0.018,
+    const referenceMaterial = new THREE.LineBasicMaterial({
+      color: colorFromHex(shown),
       transparent: true,
-      opacity: 0.28,
+      opacity: this.palette.focusOpacity[2],
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: this.palette.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
-    const reference = new THREE.Points(new THREE.BufferGeometry(), referenceMaterial);
+    // Connect the same authoritative samples for readable individual paths;
+    // large datasets retain the lower-opacity batched point representation.
+    const reference = new THREE.Line(new THREE.BufferGeometry(), referenceMaterial);
     reference.userData.orbitId = orbitRecord.id;
     root.add(reference);
 
     const tailGeometry = createTailGeometry(DEFAULT_TRAIL_POINTS);
-    const tailMaterial = createTailMaterial(color);
+    const tailMaterial = createTailMaterial(shown, this.palette.additive);
     const tail = new THREE.Points(tailGeometry, tailMaterial);
+    tail.visible = false;
     tail.userData.orbitId = orbitRecord.id;
     root.add(tail);
 
     const marker = new THREE.Mesh(
       new THREE.SphereGeometry(0.024, 24, 16),
       new THREE.MeshStandardMaterial({
-        color: colorFromHex(color),
-        emissive: colorFromHex(color),
+        color: colorFromHex(shown),
+        emissive: colorFromHex(shown),
         emissiveIntensity: 0.9,
         transparent: true,
         opacity: 1,
@@ -799,23 +962,28 @@ export class OrbitScene {
       }),
     );
     marker.userData.orbitId = orbitRecord.id;
+    marker.visible = false;
     root.add(marker);
 
     this.root.add(root);
-    const group = { root, reference, tail, marker, orbitRecord, referenceSignature: '' };
+    const group = { root, reference, tail, marker, orbitRecord, color, referenceSignature: '', referenceSource: null };
     this.updateOrbitReference(group, orbitRecord, perturbationModel);
+    const computed = this.computedRecords.get(orbitRecord.id);
+    if (computed) this.updateOrbitGroup(group, computed, this.elapsedSeconds);
     return group;
   }
 
   updateOrbitReference(group, orbitRecord, perturbationModel = this.perturbationModel) {
     const signature = orbitReferenceSignature(orbitRecord, perturbationModel);
-    if (group.referenceSignature === signature) return;
+    const source = orbitRecord.reference;
+    if (group.referenceSignature === signature && group.referenceSource === source) return;
+    if (group.referenceSignature && group.referenceSignature !== signature) {
+      group.marker.visible = false;
+      group.tail.visible = false;
+      this.computedRecords.delete(orbitRecord.id);
+    }
 
-    const samples = sampleOrbit(
-      orbitRecord.orbit,
-      orbitReferenceSampleCount(orbitRecord.orbit, this.maxReferenceSamples),
-      { perturbationModel },
-    );
+    const samples = Array.isArray(source) ? source.filter((sample) => isFiniteVector(sample?.positionKm)) : [];
     const positions = new Float32Array(samples.length * 3);
     samples.forEach((sample, index) => {
       const point = vectorToScene(sample.positionKm);
@@ -824,9 +992,30 @@ export class OrbitScene {
 
     const referenceGeometry = new THREE.BufferGeometry();
     referenceGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (samples.length > 0) referenceGeometry.computeBoundingSphere();
     group.reference.geometry.dispose();
     group.reference.geometry = referenceGeometry;
     group.referenceSignature = signature;
+    group.referenceSource = source;
+  }
+
+  // The backend owns orbital propagation. Only authoritative returned samples
+  // enter the scene; a disconnected backend leaves the last frame visible.
+  setComputedFrame(frame) {
+    this.computedRecords = new Map((frame?.records ?? []).map((record) => [record.id, record]));
+    if (Number.isFinite(frame?.elapsedSeconds)) this.elapsedSeconds = frame.elapsedSeconds;
+    if (this.orbitBatch) {
+      this.orbitBatch.updateFrame(this.computedRecords, this.elapsedSeconds);
+      return;
+    }
+    for (const [id, group] of this.orbitGroups) {
+      const computed = this.computedRecords.get(id);
+      if (computed) this.updateOrbitGroup(group, computed, this.elapsedSeconds);
+      else {
+        group.marker.visible = false;
+        group.tail.visible = false;
+      }
+    }
   }
 
   update(orbits, elapsedSeconds, perturbationModel = this.perturbationModel) {
@@ -834,40 +1023,41 @@ export class OrbitScene {
     this.perturbationModel = normalizePerturbationModel(perturbationModel);
     this.earthBody.rotation.y = earthRotationAngleAt(elapsedSeconds);
     this.axesGroup.rotation.y = frameAxesRotationAngleAt(this.frame, elapsedSeconds);
-    this.syncOrbits(orbits, this.perturbationModel);
-    for (const orbitRecord of orbits) {
-      const group = this.orbitGroups.get(orbitRecord.id);
-      if (!group || !orbitRecord.visible) continue;
-      this.updateOrbitGroup(group, orbitRecord, elapsedSeconds);
+    if (this.orbitBatch) this.orbitBatch.setTime(elapsedSeconds);
+    else for (const group of this.orbitGroups.values()) {
+      if (group.root.visible) group.tail.material.uniforms.time.value = elapsedSeconds;
     }
     this.controls.update();
     this.render();
   }
 
-  updateOrbitGroup(group, orbitRecord, elapsedSeconds) {
-    const period = orbitRecord.orbit.periodSeconds;
-    const tailSpan = Math.min(period * 0.22, Math.max(420, period * 0.1));
+  updateOrbitGroup(group, computed, elapsedSeconds) {
+    const current = computed.state?.positionKm;
+    group.marker.visible = isFiniteVector(current);
+    if (group.marker.visible) group.marker.position.copy(vectorToScene(current));
+    const trail = Array.isArray(computed.trail) ? computed.trail.filter(isFiniteVector) : [];
+    group.tail.visible = trail.length > 0;
+    if (trail.length > group.tail.geometry.getAttribute('position').count) {
+      group.tail.geometry.dispose();
+      group.tail.geometry = createTailGeometry(trail.length);
+    }
     const positions = group.tail.geometry.getAttribute('position');
     const alphas = group.tail.geometry.getAttribute('alpha');
     const phases = group.tail.geometry.getAttribute('phase');
     group.tail.material.uniforms.time.value = elapsedSeconds;
 
-    for (let i = 0; i < DEFAULT_TRAIL_POINTS; i += 1) {
-      const t = elapsedSeconds - tailSpan * (1 - i / (DEFAULT_TRAIL_POINTS - 1));
-      const state = propagateOrbit(orbitRecord.orbit, t, { perturbationModel: this.perturbationModel });
-      const point = vectorToScene(state.positionKm);
-      positions.setXYZ(i, point.x, point.y, point.z);
-      const fade = i / (DEFAULT_TRAIL_POINTS - 1);
-      alphas.setX(i, orbitRecord.visible ? 0.03 + fade ** 1.35 * 0.84 : 0);
+    for (let i = 0; i < trail.length; i += 1) {
+      const point = trail[i];
+      positions.setXYZ(i, point.x * KM_TO_SCENE, point.z * KM_TO_SCENE, -point.y * KM_TO_SCENE);
+      const fade = trail.length > 1 ? i / (trail.length - 1) : 1;
+      alphas.setX(i, 0.03 + fade ** 1.35 * 0.84);
       phases.setX(i, fade);
     }
     positions.needsUpdate = true;
     alphas.needsUpdate = true;
     phases.needsUpdate = true;
-
-    const state = propagateOrbit(orbitRecord.orbit, elapsedSeconds, { perturbationModel: this.perturbationModel });
-    const current = vectorToScene(state.positionKm);
-    group.marker.position.copy(current);
+    group.tail.geometry.setDrawRange(0, trail.length);
+    if (trail.length > 0) group.tail.geometry.computeBoundingSphere();
   }
 
   clearCalibrationMarkers() {
@@ -883,7 +1073,7 @@ export class OrbitScene {
     group.visible = marker.visible !== false;
     group.userData.calibrationMarker = marker;
 
-    const color = colorFromHex(marker.color);
+    const color = colorFromHex(this.displayColor(marker.color));
     const core = new THREE.Mesh(
       new THREE.SphereGeometry(0.034, 28, 18),
       new THREE.MeshStandardMaterial({
@@ -904,7 +1094,7 @@ export class OrbitScene {
         transparent: true,
         opacity: 0.72,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
+        blending: this.palette.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       }),
     );
     halo.rotation.x = Math.PI / 2;
@@ -927,6 +1117,7 @@ export class OrbitScene {
     this.camera.aspect = clientWidth / clientHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(clientWidth, clientHeight, false);
+    this.orbitBatch?.setViewport(clientHeight, this.renderer.getPixelRatio());
     this.render();
   }
 
@@ -936,7 +1127,26 @@ export class OrbitScene {
 
   capturePng() {
     this.render();
-    return this.renderer.domElement.toDataURL('image/png');
+    if (this.palette.clearAlpha >= 1) return this.renderer.domElement.toDataURL('image/png');
+    // A transparent stage would export as a transparent PNG: flatten it onto the stage colour.
+    const source = this.renderer.domElement;
+    const flat = document.createElement('canvas');
+    flat.width = source.width;
+    flat.height = source.height;
+    const ctx = flat.getContext('2d');
+    ctx.fillStyle = `#${new THREE.Color(this.palette.clear).getHexString()}`;
+    ctx.fillRect(0, 0, flat.width, flat.height);
+    ctx.drawImage(source, 0, 0);
+    return flat.toDataURL('image/png');
+  }
+
+  getPerformanceStats() {
+    if (this.orbitBatch) return { ...this.orbitBatch.stats(), totalDrawCalls: this.renderer?.info?.render?.calls ?? null };
+    return {
+      mode: 'individual', orbitCount: this.orbitGroups.size,
+      orbitDrawCallBudget: [...this.orbitGroups.values()].reduce((sum, group) => sum + (group.root.visible ? [group.reference, group.tail, group.marker].filter((object) => object.visible).length : 0), 0),
+      totalDrawCalls: this.renderer?.info?.render?.calls ?? null,
+    };
   }
 }
 

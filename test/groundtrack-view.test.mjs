@@ -2,11 +2,54 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  GroundTrackView,
   lonLatToMapPoint,
   mapPointToLonLat,
   normalizeMapViewport,
   selectionToLonLatBounds,
 } from '../js/groundtrack-view.mjs';
+
+test('unchanged map panel and fullscreen states do not redraw the map', () => {
+  const view = new GroundTrackView();
+  let draws = 0;
+  view.draw = () => { draws += 1; };
+  view.setPanelOpen(false);
+  view.setFullscreen(false);
+  assert.equal(draws, 0);
+  view.setPanelOpen(true);
+  assert.equal(draws, 1);
+  for (let index = 0; index < 60; index += 1) {
+    view.setPanelOpen(true);
+    view.setFullscreen(false);
+  }
+  assert.equal(draws, 1);
+  view.setFullscreen(true);
+  assert.equal(draws, 2);
+  view.setPanelOpen(false);
+  view.setFullscreen(false);
+  assert.equal(draws, 2);
+});
+
+test('map draws only changed snapshots and stores hidden snapshots for reopening', () => {
+  const view = new GroundTrackView();
+  let draws = 0;
+  view.draw = () => { draws += 1; };
+  const track = { id: 'one', points: [] };
+  view.setData([track], { selectedIds: ['one'], elapsedSeconds: 20 });
+  assert.equal(draws, 0);
+  assert.deepEqual(view.tracks, [track]);
+  view.setPanelOpen(true);
+  assert.equal(draws, 1);
+  view.setData([track], { selectedIds: ['one', 'one'], elapsedSeconds: 20 });
+  view.setOptions({ highlightEquator: true });
+  assert.equal(draws, 1, 'repeated presentation state must not redraw unchanged data');
+  view.setData([track], { selectedIds: [], elapsedSeconds: 20 });
+  assert.equal(draws, 2, 'selection changes redraw');
+  view.setData([{ ...track }], { selectedIds: [], elapsedSeconds: 21 });
+  assert.equal(draws, 3, 'new backend snapshots redraw');
+  view.setOptions({ highlightEquator: false });
+  assert.equal(draws, 4);
+});
 
 const nearlyEqual = (actual, expected, tolerance, message) => {
   assert.ok(

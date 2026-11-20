@@ -1,154 +1,125 @@
-## 轨道模拟工作台
+# 轨道仿真工作台 · Orbit Workbench
 
-本项目是一个本地网页应用，用于在浏览器中演示 ECI / ECEF 坐标系下的轨道仿真、星下点轨迹和位置矢量/速度矢量标定。
+**v0.2.0** 对应 Trajectory Demonstration v2.3。这是一个在本机运行的轨道演示工具。输入轨道六根数，即可在 ECI（地心惯性）或 ECEF（地心地固）坐标系中观察航天器运行，把同一组轨道投影到世界地图，并查看它们经过选定区域的时间。轨道计算由本机 Node.js 工作线程执行，界面支持简体中文和英文。
 
-## 运行环境
+[安装与启动](#安装与启动) · [界面演示](#界面演示) · [从旧版迁移](#从旧版迁移) · [操作手册](docs/user-guide.md)
 
-项目无法运行时，通常是因为缺少本地 Web 服务环境，或直接双击打开了 `index.html`。
+## 界面演示
 
-需要准备：
+以下截图取自 v0.2.0 实际运行的同一组内置演示轨道。在工作台中央点击 **载入演示轨道** 即可开始体验。
 
-- Windows 10/11，或其他可运行 Node.js 的系统。
-- Node.js 20.11 或更高版本，推荐安装官网标记为 LTS 的版本。
-- 现代浏览器，例如 Microsoft Edge、Chrome 或 Firefox。
-- 完整项目目录，包括 `index.html`、`server.mjs`、`js/`、`styles.css`、`assets/`、`vendor/` 等文件。
+### 工作台
 
-不需要执行 `npm install`。Three.js 等前端依赖已经放在 `vendor/` 中。
+选中名册中的 **LEO-01** 后，左上角显示周期、近地点和远地点高度，右侧「轨道档案」显示它的六根数。拖动地球可旋转视角，通过底栏控制播放与仿真时间。
 
-不要直接双击 `index.html` 运行。项目使用 ES Module、纹理和本地静态资源，应该通过 `server.mjs` 启动本地 Web 服务后访问。
+![工作台显示三条演示轨道、LEO-01 的轨道参数和 ECI 状态矢量](docs/screenshots/workbench.png)
 
-## 安装 Node.js
+### 星下点与区域统计
 
-如果电脑上没有 Node.js，推荐使用官方安装包（已安装请跳过该步骤）：
+在 **星下点** 视图勾选要记录的轨道，点击 **运行** 即可在地图上绘出轨迹。按住 `Shift` 拖动框选区域，下方会列出各轨道落入选区的采样点数，以及最早和最晚的 UTC 时刻。结果可导出为 CSV。
 
-1. 打开 Node.js 官方下载页：`https://nodejs.org/en/download`。
-2. 选择标记为 `LTS` 的版本。
-3. Windows 用户下载 `Windows Installer (.msi)` 并运行安装程序。
-4. 安装过程中保持默认选项即可，尤其要保留自动配置 `PATH` 的选项。
-5. 安装完成后，关闭并重新打开 CMD 或 PowerShell。
-6. 执行以下命令确认安装成功：
+![星下点地图中的三条轨迹、矩形选区、区域统计表和右侧轨道视窗](docs/screenshots/ground-track.png)
+
+### 计算任务
+
+打开 **任务** 可查看本机计算服务的连接状态、工作线程和队列。任务账本记录每项任务的进度、耗时和结果大小，右侧控制台显示对应日志。
+
+![计算任务视图展示在线状态、工作线程、已完成的任务和控制台日志](docs/screenshots/compute-jobs.png)
+
+## 安装与启动
+
+### 1. 获取项目
+
+在 [v0.2.0 发布页](https://github.com/motionalpha84/orbit-workbench/releases/tag/v0.2.0) 下载 **Source code (zip)** 并完整解压。使用 Git 也可检出此版本：
+
+```bash
+git clone --branch v0.2.0 https://github.com/motionalpha84/orbit-workbench.git
+cd orbit-workbench
+```
+
+### 2. 安装 Node.js
+
+支持 Windows 10/11、macOS 和 Linux。需要 **Node.js 20.11 或更高版本**，以及现代浏览器，如 Edge、Chrome 或 Firefox。Three.js、字体、地球纹理和地图均随项目提供，无需执行 `npm install`。
+
+已安装 Node.js 的用户可直接检查版本。首次安装请从 [Node.js 官方下载页](https://nodejs.org/en/download) 选择 LTS 版本。Windows 用户运行 `.msi` 安装程序并保留添加到 `PATH` 的选项。如果没有管理员权限，可使用官方免安装压缩包，将解压目录加入用户 `PATH`。
+
+安装后重新打开终端，检查版本：
 
 ```bash
 node -v
 npm -v
 ```
 
-只要 `node -v` 显示 `v20.11.0` 或更高版本，就可以运行本项目。`npm` 会随官方 Node.js 安装包一起安装，但本项目当前不需要执行 `npm install`。
+### 3. 启动工作台
 
-如果公司电脑没有管理员权限，可以让管理员安装 Node.js LTS，或使用官方页面提供的免安装压缩包版本，并把解压目录加入用户 `PATH`。
+**Windows** 可双击项目根目录的 `start-workbench.bat`。启动器会尝试使用 Codex 桌面环境随附的 Node.js，再查找系统 `PATH` 中的 Node.js，并自动打开浏览器。
 
-## Windows 启动方式
-
-推荐双击：
-
-```bat
-start-workbench.bat
-```
-
-默认启动地址：
-
-```text
-http://127.0.0.1:4173
-```
-
-脚本会优先使用 Codex 桌面环境自带的 Node.js。如果是在其他电脑上运行，且没有 Codex 自带 Node.js，请先安装 Node.js，然后再运行脚本。
-
-## 手动启动
-
-在项目目录中打开终端，运行：
+**所有平台** 均可在包含 `server.mjs` 的项目根目录打开终端，运行以下任一命令：
 
 ```bash
 npm start
 ```
 
-看到类似输出后，在浏览器打开对应地址：
-
-```text
-ECI orbit workbench running at http://127.0.0.1:4173
-```
-
-也可以直接运行：
-
 ```bash
 node server.mjs
 ```
 
-## 配置网页端口
+浏览器打开 **[http://127.0.0.1:4174](http://127.0.0.1:4174)**。保持服务终端运行，按 `Ctrl+C` 关闭。直接双击 `index.html` 无法连接计算服务。
 
-默认端口是 `4173`。如果端口被占用，可以通过环境变量 `PORT` 修改。
+### 更换端口
 
-Windows CMD：
+服务仅监听本机 `127.0.0.1`。默认端口 `4174` 被占用时，可改用 `4180`，然后访问 [http://127.0.0.1:4180](http://127.0.0.1:4180)。
+
+**Windows CMD**
 
 ```bat
 set PORT=4180
 start-workbench.bat
 ```
 
-Windows PowerShell：
+**Windows PowerShell**
 
 ```powershell
 $env:PORT = "4180"
 .\start-workbench.bat
 ```
 
-也可以直接手动启动：
-
-```powershell
-$env:PORT = "4180"
-node .\server.mjs
-```
-
-macOS / Linux / Git Bash：
+**macOS / Linux / Git Bash**
 
 ```bash
 PORT=4180 node server.mjs
 ```
 
-然后访问：
+`ORBIT_WORKERS` 可设置 1–16 个计算线程。Windows 启动器支持 `OPEN_BROWSER=0` 以关闭自动打开浏览器的行为。
 
-```text
-http://127.0.0.1:4180
-```
+## 从旧版迁移
 
-当前服务固定监听 `127.0.0.1`，即只允许本机访问。如果要换端口，只需要改 `PORT`，不需要修改代码。
+v0.1.0 默认使用端口 `4173`，v0.2.0 默认使用 `4174`。浏览器按地址和端口分别保存工作区。升级前可在旧版导出轨道组 JSON，再启动新版，打开 **资产 → 导入 JSON** 恢复轨道。导入会替换当前场景；如需保留它，可先导出备份。
 
-## 常见无法运行原因
+## 功能与操作
 
-- 没有安装 Node.js：安装 Node.js 20.11 或更高版本后重试。
-- Node.js 版本过旧：`server.mjs` 使用较新的 ESM 能力，旧版 Node 可能无法启动。
-- 直接打开 `index.html`：请改用 `start-workbench.bat` 或 `node server.mjs`。
-- 端口被占用：设置新的 `PORT`，例如 `4180`、`4181`。
-- 只复制了部分文件：请复制完整项目目录，尤其是 `assets/`、`vendor/`、`js/`。
-- 在错误目录运行命令：请在包含 `server.mjs` 的项目根目录运行。
+- 用半长轴、偏心率、倾角、升交点赤经、近地点幅角和真近点角生成椭圆轨道。支持二体、J2 和 J3 近似模型，可切换 ECI / ECEF 显示。
+- 在名册中选择、编辑、配色和隐藏多条轨道。底栏支持暂停、重置、倍速、时间轴定位和现实运行时长限制。
+- 在星下点视图记录地面轨迹，按圈数或时长保留历史，导出地图 PNG 或统计 CSV。
+- 通过 **标定** 同时管理多个位置或速度矢量，查看命中点、最近参考和残差。通过 **资产** 保存轨道组、导入旧版 JSON / TXT、导出 JSON 和场景截图。
 
-## 功能
+详细操作见[操作手册](docs/user-guide.md)，计算接口与数据格式见[本机计算 API](server/API.md)。
 
-- 支持 `ECI` / `ECEF` 坐标系切换。
-- 输入轨道六要素生成航天器轨迹、粒子尾迹和完整轨道参考。
-- 多轨道管理、颜色设置、轨道悬停提示、选中高亮和截图导出。
-- 支持二体运动、`J2` 摄动和 `J3` 摄动模型。
-- 支持位置矢量/速度矢量标定，并可管理多个标定目标。
-- 模拟仿真时刻显示、启动、暂停、重置、速度倍率和现实运行时长限制。
-- 支持 `JSON` 导入导出和 `TXT` 批量导入。
+## 常见启动问题
+
+| 现象 | 处理方法 |
+| --- | --- |
+| 终端找不到 `node` 或 `npm` | 检查 Node.js 安装与 `PATH`，重新打开终端后运行 `node -v`。 |
+| 找不到 `server.mjs`、图像或模块 | 完整解压项目，在含 `server.mjs` 的目录运行命令，保留 `assets/`、`vendor/`、`js/` 和 `server/`。 |
+| 端口被占用 | 设置其他 `PORT`，并在浏览器中打开对应端口。 |
+| 界面无法连接计算服务 | 确认服务终端仍在运行，通过终端输出的 HTTP 地址访问，在「任务」中点击「重试连接」。 |
 
 ## 测试
 
-项目使用 Node.js 内置测试运行器：
+在项目根目录运行 `npm test`，或直接运行 `node --test`。测试使用 Node.js 内置测试运行器。
 
-```bash
-npm test
-```
+## 贡献、安全与许可证
 
-如果不使用 npm，也可以直接运行：
+请通过 Issue 或 Pull Request 提交反馈与改进。开发流程见[贡献指南](CONTRIBUTING.md)，安全问题请按[安全政策](SECURITY.md)私下报告。
 
-```bash
-node --test
-```
-
-## 贡献与安全
-
-欢迎通过 Issue 或 Pull Request 反馈问题和改进建议。提交前请阅读 `CONTRIBUTING.md`，安全相关问题请按 `SECURITY.md` 私下报告。
-
-## 许可证
-
-本仓库当前未声明开源许可证。公开发布前，建议由仓库维护者根据实际授权意愿添加 `LICENSE` 文件。
+本仓库当前未声明项目级开源许可证。随附的第三方字体和图标保留各自的许可说明，见[字体目录](assets/fonts/)和[图标说明](assets/icons/README.md)。
